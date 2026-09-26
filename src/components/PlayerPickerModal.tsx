@@ -447,13 +447,6 @@ export const PlayerPickerModal: React.FC<PlayerPickerModalProps> = ({
     });
 
     return deduped.sort((a, b) => {
-      // Prioritize active and upcoming games over ended games
-      const aEnded = isPlayerGameEnded(a);
-      const bEnded = isPlayerGameEnded(b);
-      if (aEnded !== bEnded) {
-        return aEnded ? 1 : -1;
-      }
-
       // 1. If user explicitly selected a specific matchup room (e.g. ATL@GB), group by that matchup's teams
       const isMatchupSpecific = isRestrictedToGame || (selectedGameFilter && selectedGameFilter !== 'ALL');
       if (isMatchupSpecific) {
@@ -481,37 +474,53 @@ export const PlayerPickerModal: React.FC<PlayerPickerModalProps> = ({
       }
 
       // 3. STAT-BASED RANK ORDER (PRIMARY REQUIREMENT):
-      // QB: Ranked strictly by Passing Yards descending
-      // RB: Ranked strictly by Rushing Yards descending
-      // WR/TE: Ranked strictly by Receiving Yards descending
+      // QB: Ranked strictly by Passing Yards descending for the season
+      // RB: Ranked strictly by Rushing Yards descending for the season
+      // WR/TE: Ranked strictly by Receiving Yards descending for the season
       const yardsA = getPlayerPrimaryYardage(a, sport);
       const yardsB = getPlayerPrimaryYardage(b, sport);
       if (yardsA !== yardsB) {
         return yardsB - yardsA; // Highest league yardage leads!
       }
 
-      // 4. In-game live or final fantasy points descending
+      // 4. Secondary Season TD tiebreaker
+      const tdA = Number(a.seasonStats?.tds ?? (a as any).tds ?? 0);
+      const tdB = Number(b.seasonStats?.tds ?? (b as any).tds ?? 0);
+      if (tdA !== tdB) {
+        return tdB - tdA;
+      }
+
+      // 5. If not superstars mode, prioritize active and upcoming games over ended games
+      if (!isSuperstarsMode) {
+        const aEnded = isPlayerGameEnded(a);
+        const bEnded = isPlayerGameEnded(b);
+        if (aEnded !== bEnded) {
+          return aEnded ? 1 : -1;
+        }
+      }
+
+      // 6. In-game live or final fantasy points descending
       const scoreA = (a as any).current_score ?? a.score ?? 0;
       const scoreB = (b as any).current_score ?? b.score ?? 0;
       if (scoreA !== scoreB) {
         return scoreB - scoreA;
       }
 
-      // 5. Depth Rank: starters (QB1, RB1, WR1) before backups (QB2, QB3)
+      // 7. Depth Rank: starters (QB1, RB1, WR1) before backups (QB2, QB3)
       const rankA = getPlayerDepthRank(a);
       const rankB = getPlayerDepthRank(b);
       if (rankA !== rankB) {
         return rankA - rankB;
       }
 
-      // 6. Overall player superstar rating tiebreaker (99 before 90)
+      // 8. Overall player superstar rating tiebreaker (99 before 90)
       const ratingA = a.rating || 90;
       const ratingB = b.rating || 90;
       if (ratingA !== ratingB) {
         return ratingB - ratingA;
       }
 
-      // 7. Deterministic Alphabetical Name tiebreaker (guarantees zero jitter / blipping)
+      // 9. Deterministic Alphabetical Name tiebreaker (guarantees zero jitter / blipping)
       return (a.displayName || a.shortName || '').localeCompare(b.displayName || b.shortName || '');
     });
   }, [allPlayers, selectedGameFilter, activeMatchObj, searchQuery, positionFilter, hideEndedGames, activeSlot, sport, activeMatches, isRestrictedToGame]);
@@ -844,7 +853,7 @@ export const PlayerPickerModal: React.FC<PlayerPickerModalProps> = ({
                         </div>
                       </div>
 
-                      {/* Clean Score Display (Whole Numbers, No Yardage Clutter) */}
+                      {/* Official Season Yardage & Game Score Display */}
                       <div className={`w-full mb-2 py-1 px-2 rounded-2xs text-center shadow-2xs border ${
                         isInjuredOrQuestionable
                           ? 'bg-[#d1d5db] border-[#9ca3af]'
@@ -852,26 +861,32 @@ export const PlayerPickerModal: React.FC<PlayerPickerModalProps> = ({
                       }`}>
                         {scoringInfo.gameState === 'pre' ? (
                           <div className="flex items-center justify-center">
-                            <span className="font-pixel text-xs sm:text-sm font-bold text-[#475569]">
-                              0 PTS
+                            <span className="font-pixel text-[11px] sm:text-xs font-bold text-[#5c3509] tracking-wider">
+                              {getPlayerPrimaryYardage(player, sport).toLocaleString()} {getPlayerYardageLabel(player, sport)}
                             </span>
                           </div>
                         ) : scoringInfo.gameState === 'in' ? (
-                          <div className="flex items-center justify-center gap-1">
+                          <div className="flex items-center justify-center gap-1 flex-wrap">
                             <span className="font-pixel text-xs sm:text-sm font-bold text-[#b91c1c] animate-pulse">
                               {Math.round(scoringInfo.activeScore)} PTS
                             </span>
-                            <span className="font-pixel text-[8px] text-white bg-[#b91c1c] px-1 py-0.5 rounded-2xs">
+                            <span className="font-pixel text-[8px] text-white bg-[#b91c1c] px-1 py-0.5 rounded-2xs font-bold">
                               LIVE
+                            </span>
+                            <span className="font-pixel text-[9px] text-[#784610] font-bold">
+                              · {getPlayerPrimaryYardage(player, sport).toLocaleString()} {getPlayerYardageLabel(player, sport)}
                             </span>
                           </div>
                         ) : (
-                          <div className="flex items-center justify-center gap-1">
+                          <div className="flex items-center justify-center gap-1 flex-wrap">
                             <span className="font-pixel text-xs sm:text-sm font-bold text-[#12579b]">
                               {Math.round(scoringInfo.activeScore)} PTS
                             </span>
-                            <span className="font-pixel text-[8px] text-[#93c5fd] bg-[#12579b] px-1 py-0.5 rounded-2xs">
+                            <span className="font-pixel text-[8px] text-[#93c5fd] bg-[#12579b] px-1 py-0.5 rounded-2xs font-bold">
                               FINAL
+                            </span>
+                            <span className="font-pixel text-[9px] text-[#784610] font-bold">
+                              · {getPlayerPrimaryYardage(player, sport).toLocaleString()} {getPlayerYardageLabel(player, sport)}
                             </span>
                           </div>
                         )}

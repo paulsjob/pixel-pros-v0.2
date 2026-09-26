@@ -786,11 +786,59 @@
       "user_name": "RAPTORS",
       "sport": "nfl",
       "star_1_id": "nfl_3924327",
-      "star_2_id": "",
+      "star_2_id": "nfl_4575131",
       "star_3_id": "nfl_4430878",
-      "is_locked": false,
-      "device_id": "UNLOCKED",
-      "updated_at": "2026-09-26T13:27:01.393+00:00"
+      "is_locked": true,
+      "device_id": "LOCKED",
+      "updated_at": "2026-09-26T13:56:00.57+00:00"
+    },
+    {
+      "id": "35fba38f-c5cd-45ef-8347-edbfee71de8f",
+      "room_code": "BIGBANG__TEN_NYG",
+      "user_name": "RAPTORS",
+      "sport": "nfl",
+      "star_1_id": "nfl_4688380",
+      "star_2_id": "nfl_4696981",
+      "star_3_id": "nfl_4871023",
+      "is_locked": true,
+      "device_id": "LOCKED",
+      "updated_at": "2026-09-26T13:56:25.238+00:00"
+    },
+    {
+      "id": "c53fbc13-efea-4b71-a278-b5deaae71530",
+      "room_code": "BIGBANG__LV_NO",
+      "user_name": "RAPTORS",
+      "sport": "nfl",
+      "star_1_id": "nfl_4360689",
+      "star_2_id": "nfl_4890973",
+      "star_3_id": "nfl_4361370",
+      "is_locked": true,
+      "device_id": "LOCKED",
+      "updated_at": "2026-09-26T13:57:27.958+00:00"
+    },
+    {
+      "id": "83db57cc-d50b-4306-9096-bbb2b4e696f5",
+      "room_code": "BIGBANG__MIN_TB",
+      "user_name": "RAPTORS",
+      "sport": "nfl",
+      "star_1_id": "nfl_3052587",
+      "star_2_id": "nfl_3042519",
+      "star_3_id": "nfl_3116165",
+      "is_locked": true,
+      "device_id": "LOCKED",
+      "updated_at": "2026-09-26T13:57:49.974+00:00"
+    },
+    {
+      "id": "aeeafdf5-7477-436f-8777-26c0921eee41",
+      "room_code": "CUSE_WK3",
+      "user_name": "PAUL",
+      "sport": "nfl",
+      "star_1_id": "nfl_3046779",
+      "star_2_id": "nfl_3043078",
+      "star_3_id": "nfl_4430878",
+      "is_locked": true,
+      "device_id": "LOCKED",
+      "updated_at": "2026-09-26T14:02:30.324+00:00"
     }
   ],
   "locks": {
@@ -859,7 +907,11 @@
     "BIGBANG__PHI_CHI_RAPTORS_nfl": true,
     "BIGBANG__NE_JAX_RAPTORS_nfl": true,
     "BIGBANG__NYJ_DET_RAPTORS_nfl": true,
-    "BIGBANG__SEA_WSH_RAPTORS_nfl": false
+    "BIGBANG__SEA_WSH_RAPTORS_nfl": true,
+    "BIGBANG__TEN_NYG_RAPTORS_nfl": true,
+    "BIGBANG__LV_NO_RAPTORS_nfl": true,
+    "BIGBANG__MIN_TB_RAPTORS_nfl": true,
+    "CUSE_WK3_PAUL_nfl": true
   },
   "rooms": {
     "NYG_LAR_nfl": {
@@ -964,7 +1016,11 @@
     },
     "BIGBANG_nfl": {
       "sport": "nfl",
-      "createdAt": "2026-09-26T13:27:00.700Z"
+      "createdAt": "2026-09-26T13:57:49.231Z"
+    },
+    "CUSE_WK3_nfl": {
+      "sport": "nfl",
+      "createdAt": "2026-09-26T14:02:29.575Z"
     }
   }
 }
