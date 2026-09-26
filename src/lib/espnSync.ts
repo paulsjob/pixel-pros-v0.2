@@ -596,11 +596,11 @@ export async function syncESPNData(sport: SportId = 'nfl'): Promise<ESPNSyncResu
     for (const base of baseCompetitors) {
       const normName = (base.displayName || '').trim().toLowerCase();
       const leagueStat = lookupNFLAthleteLeagueStats(base.displayName, base.athleteId);
-      const seasonPass = base.seasonStats?.pass_yds ?? leagueStat?.pass_yds ?? 0;
-      const seasonRush = base.seasonStats?.rush_yds ?? leagueStat?.rush_yds ?? 0;
-      const seasonRec = base.seasonStats?.rec_yds ?? leagueStat?.rec_yds ?? 0;
+      const seasonPass = Math.max(Number(base.seasonStats?.pass_yds || 0), Number(leagueStat?.pass_yds || 0));
+      const seasonRush = Math.max(Number(base.seasonStats?.rush_yds || 0), Number(leagueStat?.rush_yds || 0));
+      const seasonRec = Math.max(Number(base.seasonStats?.rec_yds || 0), Number(leagueStat?.rec_yds || 0));
       const seasonTotalYds = seasonPass + seasonRush + seasonRec;
-      const seasonTds = base.seasonStats?.tds ?? leagueStat?.tds ?? 0;
+      const seasonTds = Math.max(Number(base.seasonStats?.tds || 0), Number(leagueStat?.tds || 0));
       const primaryLabel = base.position === 'QB' ? 'Pass Yds' : base.position === 'RB' ? 'Rush Yds' : 'Rec Yds';
       const seasonPrimaryVal = base.position === 'QB' ? seasonPass : base.position === 'RB' ? seasonRush : seasonRec;
 

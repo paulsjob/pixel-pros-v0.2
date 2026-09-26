@@ -4,7 +4,7 @@
  * Provides instant, zero-latency accurate rankings for Weekly Superstars.
  */
 
-import nflStatsJson from './nflSeasonStatsDatabase.json';
+import { nflStatsDatabase } from './nflSeasonStatsDatabase';
 
 export interface AthleteLeagueStat {
   athleteId?: string;
@@ -124,7 +124,7 @@ function normalizeNameKey(name: string): string {
 }
 
 // 1. Populate from official ESPN synced database (378 verified athletes)
-const syncedList = (nflStatsJson || []) as AthleteLeagueStat[];
+const syncedList = (nflStatsDatabase || []) as AthleteLeagueStat[];
 for (const stat of syncedList) {
   if (stat.athleteId) {
     LEAGUE_STATS_BY_ID.set(stat.athleteId, stat);

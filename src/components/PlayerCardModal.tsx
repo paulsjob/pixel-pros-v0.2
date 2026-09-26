@@ -192,19 +192,37 @@ export const PlayerCardModal: React.FC<PlayerCardModalProps> = ({
   const isOnFire = sport === 'nba' && heroScore >= 40;
 
   // 2. 2026 SEASON TOTAL STATS (from ESPN / Season Database)
+  // Merge liveOverview, database leagueStat, and player seasonStats, prioritizing authentic non-zero totals
   const leagueStat = liveOverview || (sport === 'nfl' ? lookupNFLAthleteLeagueStats(selectedPlayer.displayName, selectedPlayer.athleteId) : undefined);
   const seasonStats = selectedPlayer.seasonStats || selectedPlayer.season_stats;
-  const basePass = Number(seasonStats?.pass_yds ?? leagueStat?.pass_yds ?? 0);
-  const baseRush = Number(seasonStats?.rush_yds ?? leagueStat?.rush_yds ?? 0);
-  const baseRec = Number(seasonStats?.rec_yds ?? leagueStat?.rec_yds ?? 0);
-  const baseTds = Number(seasonStats?.tds ?? seasonStats?.touchdowns ?? leagueStat?.tds ?? 0);
+
+  const basePass = Math.max(
+    Number(liveOverview?.pass_yds || 0),
+    Number(leagueStat?.pass_yds || 0),
+    Number(seasonStats?.pass_yds || 0)
+  );
+  const baseRush = Math.max(
+    Number(liveOverview?.rush_yds || 0),
+    Number(leagueStat?.rush_yds || 0),
+    Number(seasonStats?.rush_yds || 0)
+  );
+  const baseRec = Math.max(
+    Number(liveOverview?.rec_yds || 0),
+    Number(leagueStat?.rec_yds || 0),
+    Number(seasonStats?.rec_yds || 0)
+  );
+  const baseTds = Math.max(
+    Number(liveOverview?.tds || 0),
+    Number(leagueStat?.tds || 0),
+    Number(seasonStats?.tds ?? seasonStats?.touchdowns ?? 0)
+  );
 
   // Cumulative totals must always encompass any completed or live performance
   const seasonPass = Math.max(basePass, passYds > 0 && basePass < passYds ? basePass + passYds : basePass);
   const seasonRush = Math.max(baseRush, rushYds > 0 && baseRush < rushYds ? baseRush + rushYds : baseRush);
   const seasonRec = Math.max(baseRec, recYds > 0 && baseRec < recYds ? baseRec + recYds : baseRec);
   const seasonTds = Math.max(baseTds, tds > 0 && baseTds < tds ? baseTds + tds : baseTds);
-  const seasonTotalYds = Number(seasonStats?.total_yards ?? (seasonPass + seasonRush + seasonRec));
+  const seasonTotalYds = Number(seasonStats?.total_yards && seasonStats.total_yards > (seasonPass + seasonRush + seasonRec) ? seasonStats.total_yards : (seasonPass + seasonRush + seasonRec));
 
   // 3. LAST GAME PERFORMANCE (Prior Week Recap for State 2)
   const lastGameRecapData = useMemo(() => {
