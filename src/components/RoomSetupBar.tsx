@@ -26,8 +26,14 @@ export const RoomSetupBar: React.FC<RoomSetupBarProps> = ({
     setLocalName(userName);
   }, [userName]);
 
+  const isProtectedActiveRoom = roomCode.toUpperCase() === 'BIGBANG' || roomCode.toUpperCase() === 'COUCH' || roomCode.toUpperCase() === 'HOOPS';
+
   useEffect(() => {
     setLocalRoom(roomCode);
+    if (isProtectedActiveRoom) {
+      setIsArchived(false);
+      return;
+    }
     // Check archive status of active room
     fetch('/api/rooms')
       .then((res) => res.json())
@@ -40,14 +46,18 @@ export const RoomSetupBar: React.FC<RoomSetupBarProps> = ({
         }
       })
       .catch(() => {});
-  }, [roomCode]);
+  }, [roomCode, isProtectedActiveRoom]);
 
   useEffect(() => {
     const handleArchiveUpdate = (e: any) => {
+      if (isProtectedActiveRoom) {
+        setIsArchived(false);
+        return;
+      }
       const detail = e.detail;
       if (detail?.all || (detail?.roomCode && detail.roomCode === roomCode.toUpperCase())) {
         if (detail.all) {
-          setIsArchived(roomCode.toUpperCase() !== 'COUCH' && roomCode.toUpperCase() !== 'HOOPS');
+          setIsArchived(false);
         } else if (detail.isArchived !== undefined) {
           setIsArchived(detail.isArchived);
         }
@@ -55,9 +65,13 @@ export const RoomSetupBar: React.FC<RoomSetupBarProps> = ({
     };
     window.addEventListener('pixel_pros_room_archive_update', handleArchiveUpdate);
     return () => window.removeEventListener('pixel_pros_room_archive_update', handleArchiveUpdate);
-  }, [roomCode]);
+  }, [roomCode, isProtectedActiveRoom]);
 
   const handleToggleArchive = async () => {
+    if (isProtectedActiveRoom) {
+      setIsArchived(false);
+      return;
+    }
     const nextState = !isArchived;
     setIsArchived(nextState);
     await archiveRoom(roomCode, 'nfl', nextState);

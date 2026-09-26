@@ -236,23 +236,45 @@ export default function App() {
       const code = rawCode.includes('__') ? rawCode.split('__')[0] : rawCode;
       if (!code) return;
 
+      const isProtectedRoom = code === 'BIGBANG' || code === 'COUCH' || code === 'HOOPS';
+
       const localArchived = typeof localStorage !== 'undefined'
         ? localStorage.getItem(`pixel_pros_room_archived_${code}_${r.sport || currentSport}`)
         : null;
-      const isArchived = Boolean(r.isArchived || localArchived === 'true');
+
+      let isArchived = false;
+      if (isProtectedRoom) {
+        isArchived = false;
+        if (typeof localStorage !== 'undefined') {
+          try {
+            localStorage.removeItem(`pixel_pros_room_archived_${code}_${r.sport || currentSport}`);
+            localStorage.removeItem(`pixel_pros_room_archived_${code}`);
+            localStorage.setItem(`pixel_pros_room_archived_${code}_${r.sport || currentSport}`, 'false');
+            localStorage.setItem(`pixel_pros_room_archived_${code}`, 'false');
+          } catch {}
+        }
+      } else if (typeof r.isArchived === 'boolean') {
+        isArchived = r.isArchived;
+      } else if (localArchived !== null) {
+        isArchived = localArchived === 'true';
+      }
 
       const existing = map.get(code);
       if (existing) {
         existing.squadCount = Math.max(existing.squadCount, r.squadCount || 0);
         existing.squadNames = Array.from(new Set([...existing.squadNames, ...(r.squadNames || [])]));
-        if (isArchived) existing.isArchived = true;
+        if (isProtectedRoom) {
+          existing.isArchived = false;
+        } else if (isArchived) {
+          existing.isArchived = true;
+        }
       } else {
         map.set(code, {
           roomCode: code,
           sport: r.sport || currentSport,
           squadCount: r.squadCount || 0,
           squadNames: r.squadNames || [],
-          isArchived,
+          isArchived: isProtectedRoom ? false : isArchived,
         });
       }
     });
@@ -261,6 +283,7 @@ export default function App() {
     const rawCurrentCode = (roomCode || '').trim().toUpperCase();
     const currentCode = rawCurrentCode.includes('__') ? rawCurrentCode.split('__')[0] : rawCurrentCode;
     if (currentCode) {
+      const isProtectedCurrent = currentCode === 'BIGBANG' || currentCode === 'COUCH' || currentCode === 'HOOPS';
       const existing = map.get(currentCode);
       const activeSquads = roomRosters
         .filter((r) => !isGhostUser(r.user_name))
@@ -274,7 +297,7 @@ export default function App() {
         sport: currentSport,
         squadCount: Math.max(existing?.squadCount || 0, activeSquads.length),
         squadNames: Array.from(new Set([...(existing?.squadNames || []), ...activeSquads])),
-        isArchived: Boolean(existing?.isArchived || localArchived === 'true'),
+        isArchived: isProtectedCurrent ? false : Boolean(existing?.isArchived || localArchived === 'true'),
       });
     }
 

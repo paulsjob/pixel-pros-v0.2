@@ -1083,11 +1083,14 @@ export async function fetchAllActiveRooms(
       typeof localStorage !== 'undefined'
         ? localStorage.getItem(`pixel_pros_room_archived_${val.roomCode}_${val.sport}`)
         : null;
-    let isArchived = Boolean(archiveStatusMap.get(key)?.isArchived);
-    if (localArchived === 'false') {
-      isArchived = false;
-    } else if (localArchived === 'true') {
-      isArchived = true;
+    const isProtected = val.roomCode === 'BIGBANG' || val.roomCode === 'COUCH' || val.roomCode === 'HOOPS';
+    let isArchived = isProtected ? false : Boolean(archiveStatusMap.get(key)?.isArchived);
+    if (!isProtected) {
+      if (localArchived === 'false') {
+        isArchived = false;
+      } else if (localArchived === 'true') {
+        isArchived = true;
+      }
     }
     return {
       roomCode: val.roomCode,
@@ -1195,7 +1198,11 @@ export async function fetchAllRoomsWithDetails(
       typeof localStorage !== 'undefined'
         ? localStorage.getItem(`pixel_pros_room_archived_${baseRoom}_${cleanSport}`)
         : null;
-    if (localArch === 'false') {
+    const isProtected = baseRoom === 'BIGBANG' || baseRoom === 'COUCH' || baseRoom === 'HOOPS';
+    if (isProtected) {
+      rm.isArchived = false;
+      rm.archivedAt = undefined;
+    } else if (localArch === 'false') {
       rm.isArchived = false;
     } else if (localArch === 'true') {
       rm.isArchived = true;
@@ -2107,14 +2114,17 @@ export async function archiveRoom(
   const cleanSport: SportId = sport === 'nba' ? 'nba' : 'nfl';
   if (!cleanCode) return { success: false };
 
+  const isProtected = cleanCode === 'BIGBANG' || cleanCode === 'COUCH' || cleanCode === 'HOOPS';
+  const effectiveArchived = isProtected ? false : isArchived;
+
   // Always update local cache immediately for zero-lag UI responsiveness
   try {
     if (typeof localStorage !== 'undefined') {
       localStorage.setItem(
         `pixel_pros_room_archived_${cleanCode}_${cleanSport}`,
-        isArchived ? 'true' : 'false'
+        effectiveArchived ? 'true' : 'false'
       );
-      if (!isArchived) {
+      if (!effectiveArchived) {
         localStorage.setItem(`pixel_pros_room_archived_${cleanCode}`, 'false');
         localStorage.removeItem(`pixel_pros_room_archived_${cleanCode}_nfl`);
         localStorage.removeItem(`pixel_pros_room_archived_${cleanCode}_nba`);
@@ -2125,13 +2135,13 @@ export async function archiveRoom(
   try {
     const res = await apiFetch<{ success: boolean }>('/api/rooms/archive', {
       method: 'POST',
-      body: JSON.stringify({ room_code: cleanCode, sport: cleanSport, is_archived: isArchived }),
+      body: JSON.stringify({ room_code: cleanCode, sport: cleanSport, is_archived: effectiveArchived }),
     });
     if (res && res.success) {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(
           new CustomEvent('pixel_pros_room_archive_update', {
-            detail: { roomCode: cleanCode, sport: cleanSport, isArchived },
+            detail: { roomCode: cleanCode, sport: cleanSport, isArchived: effectiveArchived },
           })
         );
       }
@@ -2145,7 +2155,7 @@ export async function archiveRoom(
   if (typeof window !== 'undefined') {
     window.dispatchEvent(
       new CustomEvent('pixel_pros_room_archive_update', {
-        detail: { roomCode: cleanCode, sport: cleanSport, isArchived },
+        detail: { roomCode: cleanCode, sport: cleanSport, isArchived: effectiveArchived },
       })
     );
   }

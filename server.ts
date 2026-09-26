@@ -647,17 +647,20 @@ app.get('/api/rooms', async (req: Request, res: Response) => {
     }
   });
 
+  const PROTECTED_ACTIVE_ROOM_CODES = new Set(['COUCH', 'HOOPS', 'BIGBANG']);
+
   const summaries = Array.from(roomMap.entries()).map(([key, val]) => {
     const lastUnderscore = key.lastIndexOf('_');
     const roomCode = lastUnderscore > 0 ? key.slice(0, lastUnderscore) : key;
     const meta = dbState.rooms?.[key];
+    const isProtected = PROTECTED_ACTIVE_ROOM_CODES.has(roomCode);
     return {
       roomCode,
       sport: val.sport,
       squadCount: val.squads.size,
       squadNames: Array.from(val.squads),
-      isArchived: Boolean(meta?.isArchived),
-      archivedAt: meta?.archivedAt,
+      isArchived: isProtected ? false : Boolean(meta?.isArchived),
+      archivedAt: isProtected ? undefined : meta?.archivedAt,
     };
   });
 
@@ -673,6 +676,10 @@ app.post('/api/rooms/archive', (req: Request, res: Response) => {
     res.status(400).json({ error: 'room_code is required' });
     return;
   }
+
+  const PROTECTED_ACTIVE_ROOM_CODES = new Set(['COUCH', 'HOOPS', 'BIGBANG']);
+  const effectiveArchived = PROTECTED_ACTIVE_ROOM_CODES.has(cleanCode) ? false : Boolean(is_archived);
+
   const key = `${cleanCode}_${cleanSport}`;
   if (!dbState.rooms) dbState.rooms = {};
   if (!dbState.rooms[key]) {
@@ -681,8 +688,8 @@ app.post('/api/rooms/archive', (req: Request, res: Response) => {
       createdAt: new Date().toISOString(),
     };
   }
-  dbState.rooms[key].isArchived = Boolean(is_archived);
-  if (is_archived) {
+  dbState.rooms[key].isArchived = effectiveArchived;
+  if (effectiveArchived) {
     dbState.rooms[key].archivedAt = new Date().toISOString();
   } else {
     delete dbState.rooms[key].archivedAt;
@@ -691,8 +698,8 @@ app.post('/api/rooms/archive', (req: Request, res: Response) => {
   // Also cascade archive status to all match slates in this room
   Object.keys(dbState.rooms).forEach((rKey) => {
     if (rKey.startsWith(`${cleanCode}__`)) {
-      dbState.rooms[rKey].isArchived = Boolean(is_archived);
-      if (is_archived) {
+      dbState.rooms[rKey].isArchived = effectiveArchived;
+      if (effectiveArchived) {
         dbState.rooms[rKey].archivedAt = new Date().toISOString();
       } else {
         delete dbState.rooms[rKey].archivedAt;
@@ -701,8 +708,8 @@ app.post('/api/rooms/archive', (req: Request, res: Response) => {
   });
 
   saveDatabase(dbState);
-  broadcastRoomUpdate(cleanCode, cleanSport, { action: 'room_archive', is_archived: Boolean(is_archived) });
-  res.json({ success: true, roomCode: cleanCode, sport: cleanSport, isArchived: Boolean(is_archived) });
+  broadcastRoomUpdate(cleanCode, cleanSport, { action: 'room_archive', is_archived: effectiveArchived });
+  res.json({ success: true, roomCode: cleanCode, sport: cleanSport, isArchived: effectiveArchived });
 });
 
 // Auto-archive all completed/past week rooms
@@ -710,10 +717,12 @@ app.post('/api/rooms/auto-archive-completed', (req: Request, res: Response) => {
   let archivedCount = 0;
   if (!dbState.rooms) dbState.rooms = {};
 
+  const PROTECTED_ACTIVE_ROOM_CODES = new Set(['COUCH', 'HOOPS', 'BIGBANG']);
+
   // Check all existing room records
   Object.entries(dbState.rooms).forEach(([key, meta]) => {
     const [code] = key.split('_');
-    if (code !== 'COUCH' && code !== 'HOOPS' && !meta.isArchived) {
+    if (!PROTECTED_ACTIVE_ROOM_CODES.has(code) && !meta.isArchived) {
       meta.isArchived = true;
       meta.archivedAt = new Date().toISOString();
       archivedCount++;
@@ -728,7 +737,7 @@ app.post('/api/rooms/auto-archive-completed', (req: Request, res: Response) => {
   );
   roomKeys.forEach((k) => {
     const [code, sp] = k.split('_');
-    if (code !== 'COUCH' && code !== 'HOOPS') {
+    if (!PROTECTED_ACTIVE_ROOM_CODES.has(code)) {
       if (!dbState.rooms[k]) {
         dbState.rooms[k] = {
           sport: sp as any,
@@ -1104,11 +1113,12 @@ async function executeWeeklyTuesdayRescan(isForced = false): Promise<{ success: 
       }
     });
 
-    // 4. Auto-archive past-week/completed rooms to reduce board clutter
+    // 4. Auto-archive past-week/completed rooms to reduce board clutter (NEVER touch protected active rooms like BIGBANG)
     if (!dbState.rooms) dbState.rooms = {};
+    const PROTECTED_ACTIVE_ROOM_CODES = new Set(['COUCH', 'HOOPS', 'BIGBANG']);
     Object.entries(dbState.rooms).forEach(([key, meta]) => {
       const [code] = key.split('_');
-      if (code !== 'COUCH' && code !== 'HOOPS' && !meta.isArchived) {
+      if (!PROTECTED_ACTIVE_ROOM_CODES.has(code) && !meta.isArchived) {
         meta.isArchived = true;
         meta.archivedAt = new Date().toISOString();
       }
