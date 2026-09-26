@@ -1,0 +1,8 @@
+{
+  "name": "Pixel Pros_v0.2",
+  "description": "Family-friendly 8-bit fantasy sports app with universal data model, whole-number scoring, team lineup builder, and retro leaderboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

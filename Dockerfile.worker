@@ -1,0 +1,26 @@
+# Pixel Pros: Lightweight Background Poller Container
+# Multi-stage minimal Python container (<50MB) for $5 Droplet / Fly.io / Render
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Prevent Python from writing .pyc files & buffering stdout/stderr
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    POLL_INTERVAL=45
+
+# Install system certificates
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+
+# Install python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy poller script
+COPY scripts/poller.py .
+
+# Run as non-privileged user for security
+RUN useradd -m polleruser
+USER polleruser
+
+CMD ["python", "poller.py", "--interval", "45"]

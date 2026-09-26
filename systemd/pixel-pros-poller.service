@@ -1,0 +1,17 @@
+[Unit]
+Description=Pixel Pros Lightweight Background Sports Poller
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/pixel-pros
+EnvironmentFile=/opt/pixel-pros/.env
+ExecStart=/usr/bin/python3 /opt/pixel-pros/scripts/poller.py --interval 45
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

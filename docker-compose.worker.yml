@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  pixel-pros-poller:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: pixel_pros_poller
+    restart: unless-stopped
+    environment:
+      - SUPABASE_URL=${SUPABASE_URL:-https://sqntjgjqtwbcqpxcqzbg.supabase.co}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - POLL_INTERVAL=45
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
