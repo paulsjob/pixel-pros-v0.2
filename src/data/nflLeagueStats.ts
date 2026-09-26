@@ -4,11 +4,13 @@
  * Provides instant, zero-latency accurate rankings for Weekly Superstars.
  */
 
+import nflStatsJson from './nflSeasonStatsDatabase.json';
+
 export interface AthleteLeagueStat {
   athleteId?: string;
   displayName: string;
   teamCode: string;
-  position: 'QB' | 'RB' | 'WR' | 'TE' | 'K';
+  position: 'QB' | 'RB' | 'WR' | 'TE' | 'K' | string;
   pass_yds: number;
   rush_yds: number;
   rec_yds: number;
@@ -18,7 +20,7 @@ export interface AthleteLeagueStat {
 }
 
 // Verified 2026 NFL Season Leaders from ESPN
-export const NFL_LEAGUE_STATS_DATABASE: AthleteLeagueStat[] = [
+export const MANUAL_NFL_LEAGUE_STATS: AthleteLeagueStat[] = [
   // --- QUARTERBACKS (Passing Yards Leaders) ---
   { displayName: 'Josh Allen', athleteId: '3918298', teamCode: 'BUF', position: 'QB', pass_yds: 890, rush_yds: 112, rec_yds: 0, tds: 8, last_game_recap: 'vs MIA: 263 YDS • 3 TD • 28 PTS', last_game_pts: 28 },
   { displayName: 'Patrick Mahomes', athleteId: '3139477', teamCode: 'KC', position: 'QB', pass_yds: 840, rush_yds: 64, rec_yds: 0, tds: 7, last_game_recap: 'vs CIN: 251 YDS • 2 TD • 22 PTS', last_game_pts: 22 },
@@ -117,12 +119,59 @@ export const NFL_LEAGUE_STATS_DATABASE: AthleteLeagueStat[] = [
 const LEAGUE_STATS_BY_NAME = new Map<string, AthleteLeagueStat>();
 const LEAGUE_STATS_BY_ID = new Map<string, AthleteLeagueStat>();
 
-for (const stat of NFL_LEAGUE_STATS_DATABASE) {
-  if (stat.displayName) {
-    LEAGUE_STATS_BY_NAME.set(stat.displayName.trim().toLowerCase(), stat);
-  }
+function normalizeNameKey(name: string): string {
+  return name.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+// 1. Populate from official ESPN synced database (378 verified athletes)
+const syncedList = (nflStatsJson || []) as AthleteLeagueStat[];
+for (const stat of syncedList) {
   if (stat.athleteId) {
     LEAGUE_STATS_BY_ID.set(stat.athleteId, stat);
+  }
+  if (stat.displayName) {
+    LEAGUE_STATS_BY_NAME.set(stat.displayName.trim().toLowerCase(), stat);
+    LEAGUE_STATS_BY_NAME.set(normalizeNameKey(stat.displayName), stat);
+  }
+}
+
+// 2. Merge manual list to backfill any missing items or historical recaps
+for (const stat of MANUAL_NFL_LEAGUE_STATS) {
+  const existingById = stat.athleteId ? LEAGUE_STATS_BY_ID.get(stat.athleteId) : undefined;
+  const existingByName = LEAGUE_STATS_BY_NAME.get(stat.displayName.trim().toLowerCase());
+  const existing = existingById || existingByName;
+
+  if (!existing) {
+    if (stat.athleteId) LEAGUE_STATS_BY_ID.set(stat.athleteId, stat);
+    LEAGUE_STATS_BY_NAME.set(stat.displayName.trim().toLowerCase(), stat);
+    LEAGUE_STATS_BY_NAME.set(normalizeNameKey(stat.displayName), stat);
+  } else {
+    // If existing had 0 stats but manual had verified totals, merge them
+    if (existing.pass_yds === 0 && existing.rush_yds === 0 && existing.rec_yds === 0) {
+      existing.pass_yds = stat.pass_yds;
+      existing.rush_yds = stat.rush_yds;
+      existing.rec_yds = stat.rec_yds;
+      if (typeof stat.tds === 'number') existing.tds = stat.tds;
+    }
+    if (!existing.last_game_recap && stat.last_game_recap) {
+      existing.last_game_recap = stat.last_game_recap;
+      existing.last_game_pts = stat.last_game_pts;
+    }
+  }
+}
+
+export const NFL_LEAGUE_STATS_DATABASE: AthleteLeagueStat[] = Array.from(
+  new Set([...Array.from(LEAGUE_STATS_BY_ID.values()), ...MANUAL_NFL_LEAGUE_STATS])
+);
+
+export function registerAthleteLeagueStat(stat: AthleteLeagueStat): void {
+  if (!stat) return;
+  if (stat.athleteId) {
+    LEAGUE_STATS_BY_ID.set(stat.athleteId, stat);
+  }
+  if (stat.displayName) {
+    LEAGUE_STATS_BY_NAME.set(stat.displayName.trim().toLowerCase(), stat);
+    LEAGUE_STATS_BY_NAME.set(normalizeNameKey(stat.displayName), stat);
   }
 }
 
@@ -134,6 +183,10 @@ export function lookupNFLAthleteLeagueStats(displayName?: string, athleteId?: st
     const clean = displayName.trim().toLowerCase();
     if (LEAGUE_STATS_BY_NAME.has(clean)) {
       return LEAGUE_STATS_BY_NAME.get(clean);
+    }
+    const norm = normalizeNameKey(displayName);
+    if (LEAGUE_STATS_BY_NAME.has(norm)) {
+      return LEAGUE_STATS_BY_NAME.get(norm);
     }
   }
   return undefined;

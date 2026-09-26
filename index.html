@@ -27,26 +27,33 @@
         font-display: block;
         src: url('/fonts/vt323.ttf') format('truetype');
       }
-      /* Force retro arcade font stack across DOM, eliminating casual/system fallbacks */
-      *, *::before, *::after {
-        font-family: 'Press Start 2P', monospace !important;
-      }
       body {
         background-color: #0b1021;
         color: #fae5b8;
         image-rendering: pixelated;
         margin: 0;
         padding: 0;
-        font-family: 'Press Start 2P', monospace !important;
-      }
-      button, a, input, select, textarea, h1, h2, h3, h4, h5, h6, span, p, div, label {
-        font-family: 'Press Start 2P', monospace !important;
+        font-family: 'Press Start 2P', monospace;
       }
       .font-pixel, .font-retro {
-        font-family: 'Press Start 2P', monospace !important;
+        font-family: 'Press Start 2P', monospace;
       }
       .font-number {
-        font-family: 'VT323', monospace !important;
+        font-family: 'VT323', monospace;
+      }
+      /* Admin Console / Master Admin Panel: Crisp, ultra-easy-to-read modern font */
+      .admin-console,
+      .admin-console *,
+      .admin-console *::before,
+      .admin-console *::after {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
+        letter-spacing: normal !important;
+        image-rendering: auto !important;
+      }
+      .admin-console .font-mono,
+      .admin-console code,
+      .admin-console pre {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
       }
     </style>
   </head>

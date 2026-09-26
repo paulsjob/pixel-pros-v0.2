@@ -125,30 +125,20 @@ export const MyTeamView: React.FC<MyTeamViewProps> = ({
   // Auto-scroll the horizontal carousel whenever the selected slate changes
   const slateScrollRef = useRef<HTMLDivElement>(null);
   const activeSlateBtnRef = useRef<HTMLButtonElement>(null);
-  const previousActiveSlateRef = useRef(activeSlateId);
 
   useEffect(() => {
-    if (previousActiveSlateRef.current === activeSlateId) {
-      return;
-    }
-    previousActiveSlateRef.current = activeSlateId;
-
-    const container = slateScrollRef.current;
-    const btn = activeSlateBtnRef.current;
-    if (container && btn) {
-      const cRect = container.getBoundingClientRect();
-      const bRect = btn.getBoundingClientRect();
-      // Only scroll if the active button is not already fully visible in the carousel
-      const isOffLeft = bRect.left < cRect.left;
-      const isOffRight = bRect.right > cRect.right;
-      if (isOffLeft || isOffRight) {
-        const offset = isOffLeft
-          ? bRect.left - cRect.left - 16
-          : bRect.right - cRect.right + 16;
-        container.scrollBy({ left: offset, behavior: 'smooth' });
+    const timer = setTimeout(() => {
+      if (activeSlateBtnRef.current) {
+        activeSlateBtnRef.current.scrollIntoView({
+          behavior: 'smooth',
+          inline: 'center',
+          block: 'nearest',
+        });
       }
-    }
-  }, [activeSlateId]);
+    }, 40);
+
+    return () => clearTimeout(timer);
+  }, [activeSlateId, sortedMatches]);
 
   const handleScrollCarousel = (direction: 'left' | 'right') => {
     if (slateScrollRef.current) {
@@ -175,6 +165,11 @@ export const MyTeamView: React.FC<MyTeamViewProps> = ({
   }, 0);
   const totalProgressPercent = totalPossiblePicks > 0 ? Math.round((totalPicksMade / totalPossiblePicks) * 100) : 0;
 
+  const isSuperstars = currentSlate.isSuperstars;
+  const currentMatch = currentSlate.match;
+  const isCurrentMatchFinal = currentMatch ? isMatchEnded(currentMatch) : false;
+  const isCurrentMatchLive = currentMatch?.status === 'live';
+
   // Count how many stars are set in current slate (strictly valid for this game slate)
   const filledSlots = [slots.star1, slots.star2, slots.star3].filter((p) => {
     if (!p) return false;
@@ -200,11 +195,6 @@ export const MyTeamView: React.FC<MyTeamViewProps> = ({
 
   // Strict guard condition: A squad with < 3 distinct stars or invalid positions CAN NEVER BE LOCKED
   const effectiveIsLocked = !isEmptySquadState && isRosterValid && Boolean(isLocked);
-
-  const isSuperstars = currentSlate.isSuperstars;
-  const currentMatch = currentSlate.match;
-  const isCurrentMatchFinal = currentMatch ? isMatchEnded(currentMatch) : false;
-  const isCurrentMatchLive = currentMatch?.status === 'live';
 
   const gameWinnerSummary = useMemo(() => {
     if (isSuperstars) return null;
@@ -265,14 +255,14 @@ export const MyTeamView: React.FC<MyTeamViewProps> = ({
             {/* Scrollable Slate Carousel */}
             <div
               ref={slateScrollRef}
-              className="flex-1 flex items-center gap-1 sm:gap-1.5 overflow-x-auto no-scrollbar py-0.5 scroll-smooth px-1 scroll-px-2"
+              className="flex-1 flex items-center gap-1 sm:gap-1.5 overflow-x-auto no-scrollbar py-0.5 px-1 scroll-px-2"
             >
               {/* 1. ⭐ SUPERSTARS */}
               <button
                 ref={activeSlateId === 'SUPERSTARS' ? activeSlateBtnRef : undefined}
                 type="button"
                 onClick={() => onSelectSlate && onSelectSlate('SUPERSTARS')}
-                className={`touch-manipulation px-2 py-1 md:px-3.5 md:py-2 rounded-xs font-pixel text-[9px] md:text-xs border-2 cursor-pointer transition-all flex items-center gap-1 sm:gap-1.5 shrink-0 whitespace-nowrap shadow-xs md:shadow-[0_2px_0_0_#94713a] ${
+                className={`touch-manipulation px-2 py-1 md:px-3.5 md:py-2 rounded-xs font-pixel text-[9px] md:text-xs border-2 cursor-pointer transition-colors duration-150 flex items-center gap-1 sm:gap-1.5 shrink-0 whitespace-nowrap shadow-xs md:shadow-[0_2px_0_0_#94713a] ${
                   activeSlateId === 'SUPERSTARS'
                     ? 'bg-[#12579b] text-[#fae5b8] border-[#0a2d52] ring-2 ring-[#38bdf8] font-bold'
                     : 'bg-[#fae5b8] hover:bg-[#fff7ed] text-[#5c3509] border-[#c99a57]'
@@ -303,7 +293,7 @@ export const MyTeamView: React.FC<MyTeamViewProps> = ({
                     ref={isSelected ? activeSlateBtnRef : undefined}
                     type="button"
                     onClick={() => onSelectSlate && onSelectSlate(pairKey)}
-                    className={`touch-manipulation px-2 py-1 md:px-3.5 md:py-2 rounded-xs font-pixel text-[9px] md:text-xs border-2 cursor-pointer transition-all flex items-center gap-1 shrink-0 whitespace-nowrap shadow-xs min-w-max md:shadow-[0_2px_0_0_#94713a] ${
+                    className={`touch-manipulation px-2 py-1 md:px-3.5 md:py-2 rounded-xs font-pixel text-[9px] md:text-xs border-2 cursor-pointer transition-colors duration-150 flex items-center gap-1 shrink-0 whitespace-nowrap shadow-xs min-w-max md:shadow-[0_2px_0_0_#94713a] ${
                       isSelected
                         ? 'bg-[#12579b] text-[#fae5b8] border-[#0a2d52] ring-2 ring-[#38bdf8] font-bold'
                         : isLive

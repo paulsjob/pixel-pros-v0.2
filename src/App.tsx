@@ -450,21 +450,6 @@ export default function App() {
       setSquadLockState(effectiveRoom, cleanName, guardedLocked, activeSport);
       localStorage.setItem(`pixel_pros_roster_${activeSport}_${effectiveRoom}_${cleanName}`, JSON.stringify([s1, s2, s3]));
 
-      const result = await upsertUserRoster(
-        effectiveRoom,
-        cleanName,
-        s1,
-        s2,
-        s3,
-        guardedLocked,
-        activeSport
-      );
-
-      if (!result.success) {
-        console.error('Failed to sync squad to room in Supabase:', result.error);
-        showToast('Failed to sync squad to room!');
-      }
-
       // Immediately reflect the updated roster in local roomRosters state
       setRoomRosters((prev) => {
         const next = prev.filter(
@@ -485,18 +470,20 @@ export default function App() {
         return next;
       });
 
-      const updated = await fetchRoomRosters(baseRoom, activeSport);
-      setRoomRosters((prev) => {
-        const map = new Map<string, UserRoster>();
-        for (const r of updated) {
-          map.set(`${(r.room_code || '').toUpperCase()}___${(r.user_name || '').toUpperCase()}`, r);
-        }
-        for (const r of prev) {
-          const k = `${(r.room_code || '').toUpperCase()}___${(r.user_name || '').toUpperCase()}`;
-          if (!map.has(k)) map.set(k, r);
-        }
-        return Array.from(map.values());
-      });
+      const result = await upsertUserRoster(
+        effectiveRoom,
+        cleanName,
+        s1,
+        s2,
+        s3,
+        guardedLocked,
+        activeSport
+      );
+
+      if (!result.success) {
+        console.error('Failed to sync squad to room in Supabase:', result.error);
+        showToast('Failed to sync squad to room!');
+      }
     },
     [isLocked, currentSport, activeSlateId]
   );
@@ -545,6 +532,7 @@ export default function App() {
           }
         }
       } catch {}
+      initialLock = getSquadLockState(targetRoom, cleanUser, currentSport);
     }
 
     // STRICT GAME VALIDATION: If this slate is a specific matchup (AWAY@HOME),
@@ -710,30 +698,44 @@ export default function App() {
     showToast(`Dropped squad "${cleanName}".`);
   };
 
-  const handleCommitRoomCode = (newCode: string) => {
-    const clean = (newCode || (currentSport === 'nba' ? 'HOOPS' : 'COUCH')).trim().toUpperCase();
+  const handleCommitRoomCode = (newCode: string, targetSport?: SportId) => {
+    const nextSport = targetSport || currentSport;
+    if (targetSport && targetSport !== currentSport) {
+      setCurrentSport(targetSport);
+      try {
+        localStorage.setItem('pixel_pros_sport', targetSport);
+      } catch {}
+    }
+    const clean = (newCode || (nextSport === 'nba' ? 'HOOPS' : 'COUCH')).trim().toUpperCase();
     userExplicitlyJoinedRoomRef.current = clean;
     setRoomCode(clean);
     setTempRoomCode(clean);
-    localStorage.setItem(`pixel_pros_room_code_${currentSport}`, clean);
+    try {
+      localStorage.setItem(`pixel_pros_room_code_${nextSport}`, clean);
+      localStorage.setItem(`pixel_pros_room_archived_${clean}_${nextSport}`, 'false');
+      localStorage.removeItem(`pixel_pros_room_archived_${clean}`);
+    } catch {}
 
     try {
       const url = new URL(window.location.href);
       url.searchParams.set('room', clean);
+      if (nextSport) url.searchParams.set('sport', nextSport);
       window.history.replaceState({}, '', url.toString());
     } catch {}
 
     setRecentRooms((prev) => {
       const updated = [clean, ...prev.filter((r) => r !== clean)].slice(0, 8);
-      localStorage.setItem(`pixel_pros_recent_rooms_${currentSport}`, JSON.stringify(updated));
+      try {
+        localStorage.setItem(`pixel_pros_recent_rooms_${nextSport}`, JSON.stringify(updated));
+      } catch {}
       return updated;
     });
 
-    const scopedUser = (localStorage.getItem(`pixel_pros_user_${currentSport}_${clean}`) || '').toUpperCase();
+    const scopedUser = (localStorage.getItem(`pixel_pros_user_${nextSport}_${clean}`) || '').toUpperCase();
     setUserName(scopedUser);
 
-    registerActiveRoom(clean, currentSport);
-    fetchAllActiveRooms(clean, currentSport).then((rooms) => {
+    registerActiveRoom(clean, nextSport);
+    fetchAllActiveRooms(clean, nextSport).then((rooms) => {
       setAvailableRooms(rooms);
     });
 
@@ -835,11 +837,12 @@ export default function App() {
       return;
     }
 
-    const targetRoom = getEffectiveRoomCodeForSlate(roomCode, activeSlateId);
+    const currentSlate = activeSlateId;
+    const targetRoom = getEffectiveRoomCodeForSlate(roomCode, currentSlate);
     const nextLocked = !isLocked && filledCount === 3;
     setIsLocked(nextLocked);
     setSquadLockState(targetRoom, userName, nextLocked, currentSport);
-    syncLineupToSupabase(roomCode, userName, squadSlots, nextLocked);
+    syncLineupToSupabase(roomCode, userName, squadSlots, nextLocked, currentSport, currentSlate);
 
     if (nextLocked) {
       // Find list of all game slates in EXACT CAROUSEL ORDER (sorted matches)
@@ -853,7 +856,7 @@ export default function App() {
         .filter(Boolean) as string[];
 
       const allSlates = ['SUPERSTARS', ...matchSlates];
-      const currentIndex = allSlates.indexOf(activeSlateId);
+      const currentIndex = allSlates.indexOf(currentSlate);
       
       // Advance to the immediately next game button in carousel sequence!
       const nextIndex = (currentIndex >= 0 && currentIndex < allSlates.length - 1)
@@ -861,15 +864,14 @@ export default function App() {
         : 0;
       const nextSlate = allSlates[nextIndex];
 
-      const currentSlateLabel = activeSlateId === 'SUPERSTARS' ? 'SUPERSTARS' : activeSlateId;
+      const currentSlateLabel = currentSlate === 'SUPERSTARS' ? 'SUPERSTARS' : currentSlate;
 
-      if (nextSlate && nextSlate !== activeSlateId) {
+      if (nextSlate && nextSlate !== currentSlate) {
         const nextSlateLabel = nextSlate === 'SUPERSTARS' ? 'WEEKLY SUPERSTARS' : `GAME ${nextSlate.replace('@', ' @ ')}`;
-        showToast(`🔒 ${currentSlateLabel} LOCKED! Taking you to ${nextSlateLabel}...`);
+        showToast(`🔒 ${currentSlateLabel} LOCKED! Next Up: ${nextSlateLabel} ⭐`);
         setTimeout(() => {
           handleSelectSlate(nextSlate);
-          showToast(`🏈 Next Up: ${nextSlateLabel}! Pick your 3 Stars! ⭐`);
-        }, 450);
+        }, 280);
       } else {
         showToast(`🔒 ${currentSlateLabel} LOCKED! 🎉 ALL GAME SLATES COMPLETE!`);
       }
@@ -939,7 +941,8 @@ export default function App() {
         let initialLock = false;
 
         if (activeUserClean) {
-          const targetRoom = getEffectiveRoomCodeForSlate(roomCode, activeSlateId);
+          const targetSlate = activeSlateIdRef.current || 'SUPERSTARS';
+          const targetRoom = getEffectiveRoomCodeForSlate(roomCode, targetSlate);
           let dbRoster = validRosters.find(
             (r) => (r.room_code || '').toUpperCase() === targetRoom && r.user_name.toUpperCase() === activeUserClean
           );
@@ -969,12 +972,14 @@ export default function App() {
                 }
               }
             } catch {}
+            initialLock = getSquadLockState(targetRoom, activeUserClean, currentSport);
           }
         }
 
         // STRICT GAME VALIDATION: Filter out any players not matching this activeSlateId if game matchup
-        if (activeSlateId && activeSlateId.includes('@') && activeSlateId !== 'SUPERSTARS') {
-          const [awayT, homeT] = activeSlateId.split('@').map((t) => (t || '').trim().toUpperCase());
+        const currentCheckSlate = activeSlateIdRef.current;
+        if (currentCheckSlate && currentCheckSlate.includes('@') && currentCheckSlate !== 'SUPERSTARS') {
+          const [awayT, homeT] = currentCheckSlate.split('@').map((t) => (t || '').trim().toUpperCase());
           const isPlayerInGame = (p: Competitor | null) => {
             if (!p) return false;
             const pTeam = (p.teamCode || '').trim().toUpperCase();
@@ -999,7 +1004,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [roomCode, currentSport, refreshTick, activeSlateId]);
+  }, [roomCode, currentSport, refreshTick]);
 
   useEffect(() => {
     const unsubscribeScores = subscribeToRealtimeScores(
@@ -1425,9 +1430,20 @@ export default function App() {
         const slateRoster = roomRosters.find(
           (r) => (r.room_code || '').toUpperCase() === effectiveR && r.user_name.toUpperCase() === cleanUser
         );
-        const picks = [slateRoster?.star_1_id, slateRoster?.star_2_id, slateRoster?.star_3_id].filter(Boolean);
+        let picksCount = [slateRoster?.star_1_id, slateRoster?.star_2_id, slateRoster?.star_3_id].filter(Boolean).length;
+        if (picksCount === 0 && typeof localStorage !== 'undefined') {
+          try {
+            const cached = localStorage.getItem(`pixel_pros_roster_${currentSport}_${effectiveR}_${cleanUser}`);
+            if (cached) {
+              const ids = JSON.parse(cached);
+              if (Array.isArray(ids)) {
+                picksCount = ids.filter(Boolean).length;
+              }
+            }
+          } catch {}
+        }
         statusMap[slateKey] = {
-          count: picks.length,
+          count: picksCount,
           isLocked: Boolean(
             slateRoster?.is_locked ||
               slateRoster?.device_id === 'LOCKED' ||
@@ -2011,20 +2027,22 @@ export default function App() {
                                   onClick={async () => {
                                     await unarchiveRoom(c.roomCode, c.sport);
                                     showToast(`Restored room "${c.roomCode}"!`);
-                                    fetchAllActiveRooms(roomCode, currentSport).then((rooms) => setAvailableRooms(rooms));
+                                    handleCommitRoomCode(c.roomCode, c.sport);
+                                    setIsRoomModalOpen(false);
                                   }}
-                                  className="px-2 py-1 bg-[#12579b] hover:bg-[#1a6cb8] text-[#fae5b8] font-pixel text-[9px] font-bold rounded-xs cursor-pointer shadow-xs"
+                                  className="px-2.5 py-1.5 bg-[#12579b] hover:bg-[#1a6cb8] text-[#fae5b8] font-pixel text-[9px] font-bold rounded-xs cursor-pointer shadow-xs whitespace-nowrap active:scale-95"
                                 >
-                                  RESTORE
+                                  RESTORE & LOAD →
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => {
+                                  onClick={async () => {
+                                    await unarchiveRoom(c.roomCode, c.sport);
                                     setTempRoomCode(c.roomCode);
-                                    handleCommitRoomCode(c.roomCode);
+                                    handleCommitRoomCode(c.roomCode, c.sport);
                                     setIsRoomModalOpen(false);
                                   }}
-                                  className="px-2 py-1 bg-[#fae5b8] hover:bg-white text-[#5c3509] border border-[#c99a57] font-pixel text-[9px] font-bold rounded-xs cursor-pointer shadow-xs"
+                                  className="px-2.5 py-1.5 bg-[#fae5b8] hover:bg-white text-[#5c3509] border border-[#c99a57] font-pixel text-[9px] font-bold rounded-xs cursor-pointer shadow-xs whitespace-nowrap active:scale-95"
                                 >
                                   VIEW →
                                 </button>
@@ -2072,8 +2090,8 @@ export default function App() {
           currentRoom={roomCode}
           currentSport={currentSport}
           roomRosters={roomRosters}
-          onSwitchRoom={(newRoom) => {
-            handleCommitRoomCode(newRoom);
+          onSwitchRoom={(newRoom, newSport) => {
+            handleCommitRoomCode(newRoom, newSport);
           }}
           onRefreshData={triggerRefresh}
           showToast={showToast}

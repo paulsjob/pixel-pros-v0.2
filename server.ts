@@ -690,7 +690,7 @@ app.post('/api/rooms/archive', (req: Request, res: Response) => {
 
   // Also cascade archive status to all match slates in this room
   Object.keys(dbState.rooms).forEach((rKey) => {
-    if (rKey.startsWith(`${cleanCode}__`) && rKey.endsWith(`_${cleanSport}`)) {
+    if (rKey.startsWith(`${cleanCode}__`)) {
       dbState.rooms[rKey].isArchived = Boolean(is_archived);
       if (is_archived) {
         dbState.rooms[rKey].archivedAt = new Date().toISOString();
@@ -908,6 +908,38 @@ app.get('/api/espn/summary', async (req: Request, res: Response) => {
     res.json(data);
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Failed to proxy ESPN summary' });
+  }
+});
+
+// ESPN Athlete Overview (Stats, GameLog, Season Totals) Proxy with in-memory cache
+const athleteOverviewCache = new Map<string, { timestamp: number; data: any }>();
+const ATHLETE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+app.get('/api/espn/athlete-overview', async (req: Request, res: Response) => {
+  try {
+    const athleteId = String(req.query.athleteId || req.query.id || '');
+    if (!athleteId) {
+      res.status(400).json({ error: 'athleteId is required' });
+      return;
+    }
+
+    const cached = athleteOverviewCache.get(athleteId);
+    if (cached && Date.now() - cached.timestamp < ATHLETE_CACHE_TTL_MS) {
+      res.json(cached.data);
+      return;
+    }
+
+    const url = `https://site.api.espn.com/apis/common/v3/sports/football/nfl/athletes/${athleteId}/overview`;
+    const resp = await fetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(4000) });
+    if (!resp.ok) {
+      res.status(resp.status).json({ error: `ESPN returned ${resp.status}` });
+      return;
+    }
+    const data = await resp.json();
+    athleteOverviewCache.set(athleteId, { timestamp: Date.now(), data });
+    res.json(data);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to proxy ESPN athlete overview' });
   }
 });
 

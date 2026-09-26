@@ -1,10 +1,10 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { Competitor, SportId, Match } from '../types';
 import { PixelPlayerSprite } from './PixelPlayerSprite';
 import { PixelHelmet } from './PixelHelmet';
 import { X, Activity, Trophy, Calendar } from 'lucide-react';
 import { getPlayerScoringDisplay } from '../utils/teamData';
-import { lookupNFLAthleteLeagueStats } from '../data/nflLeagueStats';
+import { lookupNFLAthleteLeagueStats, registerAthleteLeagueStat, AthleteLeagueStat } from '../data/nflLeagueStats';
 
 interface PlayerCardModalProps {
   player: Competitor | null;
@@ -30,6 +30,125 @@ export const PlayerCardModal: React.FC<PlayerCardModalProps> = ({
   isSelectedForTeam,
 }) => {
   if (!selectedPlayer) return null;
+
+  // Live ESPN overview stats state for on-the-fly verification
+  const [liveOverview, setLiveOverview] = useState<AthleteLeagueStat | null>(null);
+
+  useEffect(() => {
+    if (!selectedPlayer?.athleteId || sport !== 'nfl') return;
+    let isMounted = true;
+    const fetchOverview = async () => {
+      try {
+        let res: Response;
+        try {
+          res = await fetch(`/api/espn/athlete-overview?athleteId=${selectedPlayer.athleteId}`, {
+            signal: AbortSignal.timeout(3000),
+          });
+          if (!res.ok) throw new Error('Proxy failed');
+        } catch {
+          res = await fetch(`https://site.api.espn.com/apis/common/v3/sports/football/nfl/athletes/${selectedPlayer.athleteId}/overview`, {
+            signal: AbortSignal.timeout(3000),
+          });
+        }
+        if (res.ok) {
+          const data = await res.json();
+          const statsObj = data.statistics || {};
+          const names: string[] = statsObj.names || [];
+          const splits: any[] = statsObj.splits || [];
+          const regSeason: string[] = splits.find((s: any) => s.displayName && s.displayName.includes('Regular Season'))?.stats || [];
+
+          const getStat = (name: string) => {
+            const idx = names.indexOf(name);
+            if (idx === -1 || !regSeason[idx]) return 0;
+            return parseInt(String(regSeason[idx]).replace(/,/g, ''), 10) || 0;
+          };
+
+          const pass_yds = getStat('passingYards');
+          const pass_tds = getStat('passingTouchdowns');
+          const rush_yds = getStat('rushingYards');
+          const rush_tds = getStat('rushingTouchdowns');
+          const rec_yds = getStat('receivingYards');
+          const rec_tds = getStat('receivingTouchdowns');
+          const total_tds = pass_tds + rush_tds + rec_tds;
+
+          let last_game_recap: string | undefined = undefined;
+          let last_game_pts: number | undefined = undefined;
+          const gameLogStats = data.gameLog?.statistics || [];
+          const gameLogEvents = data.gameLog?.events || {};
+
+          let mostRecentEventId: string | null = null;
+          for (const s of gameLogStats) {
+            if (s.events && s.events.length > 0) {
+              mostRecentEventId = s.events[0].eventId;
+              break;
+            }
+          }
+
+          if (mostRecentEventId) {
+            const evMeta = gameLogEvents[mostRecentEventId];
+            const opp = evMeta?.opponent?.abbreviation || evMeta?.opponent?.displayName || 'OPP';
+            const atVs = evMeta?.atVs || 'vs';
+            let gPassYds = 0, gPassTds = 0, gRushYds = 0, gRushTds = 0, gRecYds = 0, gRecTds = 0;
+            for (const cat of gameLogStats) {
+              const cNames: string[] = cat.names || [];
+              const evItem = cat.events?.find((e: any) => e.eventId === mostRecentEventId);
+              if (evItem && evItem.stats) {
+                const getGStat = (n: string) => {
+                  const idx = cNames.indexOf(n);
+                  return (idx !== -1 && evItem.stats[idx]) ? parseInt(String(evItem.stats[idx]).replace(/,/g, ''), 10) || 0 : 0;
+                };
+                const catName = (cat.displayName || '').toLowerCase();
+                if (catName.includes('pass')) {
+                  gPassYds = getGStat('passingYards');
+                  gPassTds = getGStat('passingTouchdowns');
+                } else if (catName.includes('rush')) {
+                  gRushYds = getGStat('rushingYards');
+                  gRushTds = getGStat('rushingTouchdowns');
+                } else if (catName.includes('rec')) {
+                  gRecYds = getGStat('receivingYards');
+                  gRecTds = getGStat('receivingTouchdowns');
+                }
+              }
+            }
+            const gTds = gPassTds + gRushTds + gRecTds;
+            last_game_pts = (gTds * 6) + Math.floor(gPassYds / 25) + Math.floor(gRushYds / 10) + Math.floor(gRecYds / 10);
+            const parts: string[] = [];
+            if (gPassYds > 0) parts.push(`${gPassYds} PASS`);
+            if (gRushYds > 0) parts.push(`${gRushYds} RUSH`);
+            if (gRecYds > 0) parts.push(`${gRecYds} REC`);
+            if (gTds > 0) parts.push(`${gTds} TD`);
+            if (parts.length === 0) parts.push('0 YDS');
+            last_game_recap = `${atVs} ${opp}: ${parts.join(' • ')} • ${last_game_pts} PTS`;
+          }
+
+          const freshStat: AthleteLeagueStat = {
+            athleteId: selectedPlayer.athleteId,
+            displayName: selectedPlayer.displayName,
+            teamCode: selectedPlayer.teamCode,
+            position: selectedPlayer.position as any,
+            pass_yds,
+            rush_yds,
+            rec_yds,
+            tds: total_tds,
+            last_game_recap,
+            last_game_pts,
+          };
+
+          registerAthleteLeagueStat(freshStat);
+          if (isMounted) {
+            setLiveOverview(freshStat);
+          }
+        }
+      } catch {
+        // Silently preserve cached stats
+      }
+    };
+
+    fetchOverview();
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedPlayer?.athleteId, sport]);
 
   const scoringInfo = getPlayerScoringDisplay(selectedPlayer, match, sport);
 
@@ -73,7 +192,7 @@ export const PlayerCardModal: React.FC<PlayerCardModalProps> = ({
   const isOnFire = sport === 'nba' && heroScore >= 40;
 
   // 2. 2026 SEASON TOTAL STATS (from ESPN / Season Database)
-  const leagueStat = sport === 'nfl' ? lookupNFLAthleteLeagueStats(selectedPlayer.displayName, selectedPlayer.athleteId) : undefined;
+  const leagueStat = liveOverview || (sport === 'nfl' ? lookupNFLAthleteLeagueStats(selectedPlayer.displayName, selectedPlayer.athleteId) : undefined);
   const seasonStats = selectedPlayer.seasonStats || selectedPlayer.season_stats;
   const basePass = Number(seasonStats?.pass_yds ?? leagueStat?.pass_yds ?? 0);
   const baseRush = Number(seasonStats?.rush_yds ?? leagueStat?.rush_yds ?? 0);
@@ -104,18 +223,18 @@ export const PlayerCardModal: React.FC<PlayerCardModalProps> = ({
       return { recap: rawLastStats, score: typeof rawLastScore === 'number' && rawLastScore > 0 ? rawLastScore : null };
     }
     if (sport === 'nfl') {
-      if (selectedPlayer.position === 'QB') {
-        const pYds = Math.min(seasonPass, 240 + ((selectedPlayer.uniformNumber * 7) % 80));
-        return { recap: `vs PREV OPP: ${pYds} PASS YDS • 2 TD • 21 PTS`, score: 21 };
+      if (seasonTotalYds > 0 || seasonTds > 0) {
+        return {
+          recap: `${seasonTotalYds} TOTAL YDS • ${seasonTds} TD THIS SEASON`,
+          score: null,
+        };
       }
-      if (selectedPlayer.position === 'RB') {
-        const rYds = Math.min(seasonRush, 75 + ((selectedPlayer.uniformNumber * 5) % 45));
-        return { recap: `vs PREV OPP: ${rYds} RUSH YDS • 1 TD • 16 PTS`, score: 16 };
-      }
-      const recY = Math.min(seasonRec, 65 + ((selectedPlayer.uniformNumber * 6) % 50));
-      return { recap: `vs PREV OPP: ${recY} REC YDS • 1 TD • 15 PTS`, score: 15 };
+      return {
+        recap: 'AWAITING SEASON DEBUT',
+        score: null,
+      };
     }
-    return { recap: selectedPlayer.lastGameStats || 'RECENT GAME ACTIVE', score: selectedPlayer.lastGameScore || null };
+    return { recap: selectedPlayer.lastGameStats || 'ACTIVE ON ROSTER', score: selectedPlayer.lastGameScore || null };
   }, [leagueStat, selectedPlayer, seasonPass, seasonRush, seasonRec, seasonTotalYds, sport]);
 
   return (

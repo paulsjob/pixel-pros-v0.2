@@ -29,6 +29,7 @@ import {
   Terminal,
   Archive,
   ArchiveRestore,
+  Play,
 } from 'lucide-react';
 import { SportId, UserRoster } from '../types';
 import {
@@ -45,6 +46,7 @@ import {
   isSupabaseConfigured,
   reseedMasterNFLManifest,
   archiveRoom,
+  unarchiveRoom,
   autoArchiveCompletedRooms,
   deleteRoomPermanently,
   purgeAllArchivedRooms,
@@ -63,7 +65,7 @@ interface CommissionerModalProps {
   currentRoom: string;
   currentSport: SportId;
   roomRosters: UserRoster[];
-  onSwitchRoom: (newRoom: string) => void;
+  onSwitchRoom: (newRoom: string, newSport?: SportId) => void;
   onRefreshData: () => void;
   showToast: (msg: string) => void;
 }
@@ -277,6 +279,23 @@ export const CommissionerModal: React.FC<CommissionerModalProps> = ({
   };
 
   const [copiedRoomCode, setCopiedRoomCode] = useState<string | null>(null);
+
+  const handleEnterRoom = async (roomCode: string, sport: SportId, isArchived?: boolean) => {
+    const clean = (roomCode || '').trim().toUpperCase();
+    if (!clean) return;
+
+    if (isArchived) {
+      try {
+        await unarchiveRoom(clean, sport);
+      } catch (err) {
+        console.warn('Could not unarchive room before enter:', err);
+      }
+    }
+
+    onSwitchRoom(clean, sport);
+    onClose();
+    showToast(`🚀 Entered Room "${clean}"!`);
+  };
 
   const formatStarName = (starId: string, sport: SportId = 'nfl') => {
     if (!starId) return '';
@@ -524,7 +543,7 @@ export const CommissionerModal: React.FC<CommissionerModalProps> = ({
 
     if (targetRoom.toUpperCase() === currentRoom.toUpperCase()) {
       const def = currentSport === 'nba' ? 'HOOPS' : 'COUCH';
-      onSwitchRoom(def);
+      onSwitchRoom(def, targetSport);
     }
     onRefreshData();
     refreshMasterRooms();
@@ -557,7 +576,7 @@ export const CommissionerModal: React.FC<CommissionerModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-1 sm:p-3 bg-black/85 backdrop-blur-xs font-sans">
+    <div className="admin-console fixed inset-0 z-50 flex items-center justify-center p-1 sm:p-3 bg-black/85 backdrop-blur-xs font-sans">
       <div className="relative w-[95vw] max-w-[1500px] h-[92vh] max-h-[92vh] my-[2vh] mx-auto bg-slate-950 border border-slate-800 text-slate-100 rounded-xl shadow-2xl flex flex-col overflow-hidden">
         {/* Header Bar */}
         <div className="flex items-center justify-between px-3 sm:px-6 py-2.5 sm:py-3.5 bg-slate-900/90 border-b border-slate-800 shrink-0 gap-2">
@@ -889,12 +908,12 @@ export const CommissionerModal: React.FC<CommissionerModalProps> = ({
 
                   {/* Rooms Table */}
                   <div className="border border-slate-800 rounded-lg overflow-hidden bg-slate-900/30">
-                    <div className="hidden md:grid grid-cols-12 gap-2 px-4 py-2.5 bg-slate-900/80 border-b border-slate-800 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                    <div className="hidden md:grid grid-cols-12 gap-2 px-4 py-2.5 bg-slate-900/90 border-b border-slate-800 text-[11px] font-bold uppercase tracking-wider text-slate-300">
                       <div className="col-span-3 lg:col-span-2">Room Code</div>
-                      <div className="col-span-2 lg:col-span-1">Sport</div>
-                      <div className="col-span-2 lg:col-span-2">Squads</div>
-                      <div className="col-span-2 lg:col-span-2">Status</div>
-                      <div className="col-span-3 lg:col-span-5 text-right">Actions</div>
+                      <div className="col-span-1">Sport</div>
+                      <div className="col-span-3 lg:col-span-2">Squads & Slates</div>
+                      <div className="col-span-1 lg:col-span-2">Lock Status</div>
+                      <div className="col-span-4 lg:col-span-5 text-right">Quick Actions</div>
                     </div>
 
                     {loadingRooms && allRooms.length === 0 ? (
@@ -939,121 +958,126 @@ export const CommissionerModal: React.FC<CommissionerModalProps> = ({
                             >
                               <div className="col-span-3 lg:col-span-2 flex items-center gap-2 min-w-0">
                                 <span className="text-slate-400 shrink-0">
-                                  {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                                  {isExpanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
                                 </span>
-                                <span className="font-semibold text-slate-100 font-mono tracking-wide text-sm truncate">
+                                <span className="font-bold text-white font-mono tracking-wide text-sm truncate">
                                   {room.roomCode}
                                 </span>
                                 {isCurrent && (
-                                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 font-medium border border-blue-500/30 shrink-0">
+                                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/25 text-blue-300 font-bold border border-blue-500/40 shrink-0">
                                     CURRENT
                                   </span>
                                 )}
                                 {room.isArchived && (
-                                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-medium border border-amber-500/30 shrink-0 flex items-center gap-0.5">
+                                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30 shrink-0 flex items-center gap-0.5">
                                     <Archive size={9} /> ARCHIVED
                                   </span>
                                 )}
                               </div>
 
-                              <div className="col-span-2 lg:col-span-1">
-                                <span className={`text-[10px] px-2 py-0.5 rounded font-semibold uppercase tracking-wider ${
+                              <div className="col-span-1">
+                                <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-wider ${
                                   room.sport === 'nfl'
-                                    ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
-                                    : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                                    ? 'bg-blue-500/15 text-blue-300 border border-blue-500/30'
+                                    : 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
                                 }`}>
                                   {room.sport.toUpperCase()}
                                 </span>
                               </div>
 
-                              <div className="col-span-2 lg:col-span-2 text-slate-300 text-xs">
-                                <div>{room.squads.length} {room.squads.length === 1 ? 'Squad' : 'Squads'}</div>
-                                <div className="text-[10px] text-slate-400 font-mono">
-                                  {(room.matches?.length || 0) > 0 ? `${(room.matches?.length || 0) + 1} slates` : 'Superstars'}
+                              <div className="col-span-3 lg:col-span-2 text-slate-200 text-xs">
+                                <div className="font-semibold text-slate-100">{room.squads.length} {room.squads.length === 1 ? 'Squad' : 'Squads'}</div>
+                                <div className="text-[11px] text-slate-400 truncate">
+                                  {room.squads.length > 0 ? room.squads.map((s) => s.userName).join(', ') : 'No squads'}
                                 </div>
                               </div>
 
-                              <div className="col-span-2 lg:col-span-2">
+                              <div className="col-span-1 lg:col-span-2">
                                 {allLocked ? (
-                                  <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 font-medium flex items-center gap-1 w-fit">
+                                  <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 font-semibold flex items-center gap-1 w-fit">
                                     <Lock size={10} /> Locked
                                   </span>
                                 ) : anyLocked ? (
-                                  <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20 font-medium w-fit">
-                                    Partial Lock
+                                  <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 font-medium w-fit">
+                                    Partial
                                   </span>
                                 ) : (
-                                  <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium flex items-center gap-1 w-fit">
+                                  <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-semibold flex items-center gap-1 w-fit">
                                     <Unlock size={10} /> Open
                                   </span>
                                 )}
                               </div>
 
-                              <div className="col-span-3 lg:col-span-5 flex items-center justify-end gap-1.5 sm:gap-2" onClick={(e) => e.stopPropagation()}>
+                              <div className="col-span-4 lg:col-span-5 flex items-center justify-end gap-1.5 flex-wrap" onClick={(e) => e.stopPropagation()}>
                                 <button
                                   type="button"
-                                  onClick={() => handleLockAllInRoom(room.roomCode, room.sport, false)}
-                                  className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap active:scale-95"
-                                  title="Unlock all squads in this room"
+                                  onClick={() => handleEnterRoom(room.roomCode, room.sport, room.isArchived)}
+                                  className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1 shadow-sm transition-all cursor-pointer whitespace-nowrap active:scale-95"
+                                  title={`Enter and load Room ${room.roomCode}`}
                                 >
-                                  <Unlock size={12} className="text-emerald-400" />
-                                  <span>Unlock All</span>
+                                  <Play size={11} className="fill-white text-white" />
+                                  <span>ENTER →</span>
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => handleLockAllInRoom(room.roomCode, room.sport, true)}
-                                  className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap active:scale-95"
-                                  title="Lock all squads in this room"
-                                >
-                                  <Lock size={12} className="text-amber-400" />
-                                  <span>Lock All</span>
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleToggleArchiveRoom(room.roomCode, room.sport, Boolean(room.isArchived));
-                                  }}
-                                  className={`px-2.5 py-1 rounded border text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap active:scale-95 ${
+                                  onClick={() => handleToggleArchiveRoom(room.roomCode, room.sport, Boolean(room.isArchived))}
+                                  className={`px-2.5 py-1.5 rounded-lg border text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap active:scale-95 ${
                                     room.isArchived
                                       ? 'bg-amber-950/80 hover:bg-amber-900 text-amber-300 border-amber-600 shadow-sm'
-                                      : 'bg-amber-950/30 hover:bg-amber-900/50 text-amber-200 hover:text-white border-amber-700/60'
+                                      : 'bg-slate-800 hover:bg-amber-950/50 text-slate-300 hover:text-amber-200 border-slate-700'
                                   }`}
                                   title={room.isArchived ? 'Restore / Unarchive Room' : 'Archive Room (Clear out old game)'}
                                 >
                                   {room.isArchived ? (
                                     <ArchiveRestore size={12} className="text-amber-400" />
                                   ) : (
-                                    <Archive size={12} className="text-amber-400" />
+                                    <Archive size={12} className="text-slate-400" />
                                   )}
                                   <span>{room.isArchived ? 'Unarchive' : 'Archive'}</span>
                                 </button>
                                 <button
                                   type="button"
+                                  onClick={() => handleLockAllInRoom(room.roomCode, room.sport, false)}
+                                  className="px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-medium flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap active:scale-95"
+                                  title="Unlock all squads in this room"
+                                >
+                                  <Unlock size={11} className="text-emerald-400" />
+                                  <span>Unlock</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleLockAllInRoom(room.roomCode, room.sport, true)}
+                                  className="px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-medium flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap active:scale-95"
+                                  title="Lock all squads in this room"
+                                >
+                                  <Lock size={11} className="text-amber-400" />
+                                  <span>Lock</span>
+                                </button>
+                                <button
+                                  type="button"
                                   onClick={() => handleCopyOneTapLink(room.roomCode, room.sport)}
-                                  className="px-2.5 py-1 rounded bg-blue-950/50 hover:bg-blue-900/70 text-blue-200 hover:text-white border border-blue-700/60 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap active:scale-95"
+                                  className="px-2 py-1.5 rounded-lg bg-blue-950/50 hover:bg-blue-900/70 text-blue-200 hover:text-white border border-blue-700/60 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap active:scale-95"
                                   title="Copy 1-tap invite link"
                                 >
                                   {copiedRoomCode === room.roomCode ? (
                                     <>
-                                      <Check size={12} className="text-emerald-400" />
+                                      <Check size={11} className="text-emerald-400" />
                                       <span className="text-emerald-400 font-bold">Copied!</span>
                                     </>
                                   ) : (
                                     <>
-                                      <Copy size={12} className="text-blue-400" />
-                                      <span>Copy Link</span>
+                                      <Copy size={11} className="text-blue-400" />
+                                      <span>Link</span>
                                     </>
                                   )}
                                 </button>
                                 <button
                                   type="button"
                                   onClick={() => setRoomToDelete({ room: room.roomCode, sport: room.sport })}
-                                  className="px-2.5 py-1 rounded bg-red-950/50 hover:bg-red-900/70 text-red-300 hover:text-white border border-red-800/60 text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap active:scale-95"
+                                  className="p-1.5 rounded-lg bg-red-950/50 hover:bg-red-900/70 text-red-300 hover:text-white border border-red-800/60 text-xs font-medium transition-colors cursor-pointer active:scale-95"
                                   title="Wipe room and squads"
                                 >
                                   <Trash2 size={12} className="text-red-400" />
-                                  <span className="hidden xl:inline">Wipe Room</span>
                                 </button>
                               </div>
                             </div>
@@ -1114,21 +1138,12 @@ export const CommissionerModal: React.FC<CommissionerModalProps> = ({
                               <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-slate-800/60" onClick={(e) => e.stopPropagation()}>
                                 <button
                                   type="button"
-                                  onClick={() => handleLockAllInRoom(room.roomCode, room.sport, false)}
-                                  className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-medium flex items-center gap-1 border border-slate-700 transition-colors cursor-pointer active:scale-95"
-                                  title="Unlock all squads"
+                                  onClick={() => handleEnterRoom(room.roomCode, room.sport, room.isArchived)}
+                                  className="flex-1 min-w-[130px] px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm transition-all cursor-pointer whitespace-nowrap active:scale-95"
+                                  title={`Enter and play in Room ${room.roomCode}`}
                                 >
-                                  <Unlock size={11} className="text-emerald-400" />
-                                  <span>Unlock All</span>
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleLockAllInRoom(room.roomCode, room.sport, true)}
-                                  className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-medium flex items-center gap-1 border border-slate-700 transition-colors cursor-pointer active:scale-95"
-                                  title="Lock all squads"
-                                >
-                                  <Lock size={11} className="text-amber-400" />
-                                  <span>Lock All</span>
+                                  <Play size={12} className="fill-white text-white" />
+                                  <span>ENTER ROOM →</span>
                                 </button>
                                 <button
                                   type="button"
@@ -1136,9 +1151,9 @@ export const CommissionerModal: React.FC<CommissionerModalProps> = ({
                                     e.stopPropagation();
                                     handleToggleArchiveRoom(room.roomCode, room.sport, Boolean(room.isArchived));
                                   }}
-                                  className={`px-2 py-1 rounded text-[11px] font-medium flex items-center gap-1 border transition-colors cursor-pointer active:scale-95 ${
+                                  className={`px-2 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 border transition-colors cursor-pointer active:scale-95 ${
                                     room.isArchived
-                                      ? 'bg-amber-950/60 hover:bg-amber-900 text-amber-300 border-amber-600/70'
+                                      ? 'bg-amber-950/70 hover:bg-amber-900 text-amber-300 border-amber-600/70'
                                       : 'bg-slate-800 hover:bg-amber-950/40 text-slate-300 hover:text-amber-200 border-slate-700'
                                   }`}
                                   title={room.isArchived ? 'Restore / Unarchive' : 'Archive (Clear out old game)'}
@@ -1152,30 +1167,38 @@ export const CommissionerModal: React.FC<CommissionerModalProps> = ({
                                 </button>
                                 <button
                                   type="button"
+                                  onClick={() => handleLockAllInRoom(room.roomCode, room.sport, false)}
+                                  className="px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium flex items-center gap-1 border border-slate-700 transition-colors cursor-pointer active:scale-95"
+                                  title="Unlock all squads"
+                                >
+                                  <Unlock size={11} className="text-emerald-400" />
+                                  <span>Unlock</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleLockAllInRoom(room.roomCode, room.sport, true)}
+                                  className="px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium flex items-center gap-1 border border-slate-700 transition-colors cursor-pointer active:scale-95"
+                                  title="Lock all squads"
+                                >
+                                  <Lock size={11} className="text-amber-400" />
+                                  <span>Lock</span>
+                                </button>
+                                <button
+                                  type="button"
                                   onClick={() => handleCopyOneTapLink(room.roomCode, room.sport)}
-                                  className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-medium flex items-center gap-1 border border-slate-700 transition-colors cursor-pointer active:scale-95"
+                                  className="px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium flex items-center gap-1 border border-slate-700 transition-colors cursor-pointer active:scale-95"
                                   title="Copy 1-tap invite link"
                                 >
-                                  {copiedRoomCode === room.roomCode ? (
-                                    <>
-                                      <Check size={11} className="text-emerald-400" />
-                                      <span className="text-emerald-400 font-bold">Copied!</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Copy size={11} className="text-blue-400" />
-                                      <span>Copy Link</span>
-                                    </>
-                                  )}
+                                  <Copy size={11} className="text-blue-400" />
+                                  <span>Link</span>
                                 </button>
                                 <button
                                   type="button"
                                   onClick={() => setRoomToDelete({ room: room.roomCode, sport: room.sport })}
-                                  className="px-2 py-1 rounded bg-red-950/50 hover:bg-red-900/70 text-red-300 text-[11px] font-medium flex items-center gap-1 border border-red-800/60 transition-colors cursor-pointer ml-auto active:scale-95"
+                                  className="p-1.5 rounded-lg bg-red-950/50 hover:bg-red-900/70 text-red-300 text-xs font-medium border border-red-800/60 transition-colors cursor-pointer active:scale-95 ml-auto"
                                   title="Wipe room and squads"
                                 >
-                                  <Trash2 size={11} className="text-red-400" />
-                                  <span>Wipe</span>
+                                  <Trash2 size={12} className="text-red-400" />
                                 </button>
                               </div>
                             </div>
@@ -1184,25 +1207,34 @@ export const CommissionerModal: React.FC<CommissionerModalProps> = ({
                             {isExpanded && (
                               <div className="bg-slate-950/90 px-3 sm:px-4 py-3.5 border-t border-slate-800 space-y-4">
                                 {/* Room Subheader with Quick Actions */}
-                                <div className="flex items-center justify-between pb-2 border-b border-slate-800/70 flex-wrap gap-2">
-                                  <div className="flex items-center gap-2">
-                                    <span className="font-mono text-sm font-bold text-slate-200">
+                                <div className="flex items-center justify-between pb-3 border-b border-slate-800/70 flex-wrap gap-2.5">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="font-mono text-base font-bold text-white">
                                       🏠 ROOM: {room.roomCode}
                                     </span>
                                     <span className="text-xs text-slate-400">
                                       ({room.squads.length} total squad{room.squads.length === 1 ? '' : 's'})
                                     </span>
                                     {room.isArchived && (
-                                      <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-semibold border border-amber-500/30 flex items-center gap-1">
-                                        <Archive size={10} /> ARCHIVED
+                                      <span className="text-xs px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-semibold border border-amber-500/30 flex items-center gap-1">
+                                        <Archive size={11} /> ARCHIVED
                                       </span>
                                     )}
                                   </div>
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <button
                                       type="button"
+                                      onClick={() => handleEnterRoom(room.roomCode, room.sport, room.isArchived)}
+                                      className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md transition-all cursor-pointer active:scale-95"
+                                      title={`Switch active game view to room ${room.roomCode}`}
+                                    >
+                                      <Play size={13} className="fill-white text-white" />
+                                      <span>ENTER & PLAY IN ROOM {room.roomCode} →</span>
+                                    </button>
+                                    <button
+                                      type="button"
                                       onClick={() => handleToggleArchiveRoom(room.roomCode, room.sport, Boolean(room.isArchived))}
-                                      className={`px-2 py-1 rounded text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer active:scale-95 ${
+                                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer active:scale-95 ${
                                         room.isArchived
                                           ? 'bg-amber-950/80 hover:bg-amber-900 text-amber-300 border border-amber-600'
                                           : 'bg-amber-950/40 hover:bg-amber-900/60 text-amber-200 hover:text-white border border-amber-700/60'
@@ -1210,26 +1242,26 @@ export const CommissionerModal: React.FC<CommissionerModalProps> = ({
                                       title={room.isArchived ? 'Restore / Unarchive Room' : 'Archive Room (Clear out old game)'}
                                     >
                                       {room.isArchived ? (
-                                        <ArchiveRestore size={12} className="text-amber-400" />
+                                        <ArchiveRestore size={13} className="text-amber-400" />
                                       ) : (
-                                        <Archive size={12} className="text-amber-400" />
+                                        <Archive size={13} className="text-amber-400" />
                                       )}
                                       <span>{room.isArchived ? 'Unarchive Room' : 'Archive Room'}</span>
                                     </button>
                                     <button
                                       type="button"
                                       onClick={() => handleCopyOneTapLink(room.roomCode, room.sport)}
-                                      className="px-2 py-1 rounded bg-blue-950/50 hover:bg-blue-900/70 text-blue-200 hover:text-white border border-blue-700/60 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer active:scale-95"
+                                      className="px-3 py-1.5 rounded-lg bg-blue-950/50 hover:bg-blue-900/70 text-blue-200 hover:text-white border border-blue-700/60 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer active:scale-95"
                                       title="Copy 1-tap invite link"
                                     >
                                       {copiedRoomCode === room.roomCode ? (
                                         <>
-                                          <Check size={12} className="text-emerald-400" />
+                                          <Check size={13} className="text-emerald-400" />
                                           <span className="text-emerald-400 font-bold">Copied!</span>
                                         </>
                                       ) : (
                                         <>
-                                          <Copy size={12} className="text-blue-400" />
+                                          <Copy size={13} className="text-blue-400" />
                                           <span>Copy Link</span>
                                         </>
                                       )}

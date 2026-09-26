@@ -1083,7 +1083,12 @@ export async function fetchAllActiveRooms(
       typeof localStorage !== 'undefined'
         ? localStorage.getItem(`pixel_pros_room_archived_${val.roomCode}_${val.sport}`)
         : null;
-    const isArchived = Boolean(archiveStatusMap.get(key)?.isArchived || localArchived === 'true');
+    let isArchived = Boolean(archiveStatusMap.get(key)?.isArchived);
+    if (localArchived === 'false') {
+      isArchived = false;
+    } else if (localArchived === 'true') {
+      isArchived = true;
+    }
     return {
       roomCode: val.roomCode,
       sport: val.sport,
@@ -1186,7 +1191,15 @@ export async function fetchAllRoomsWithDetails(
     }
 
     const rm = roomMap.get(key)!;
-    if (meta?.isArchived !== undefined) {
+    const localArch =
+      typeof localStorage !== 'undefined'
+        ? localStorage.getItem(`pixel_pros_room_archived_${baseRoom}_${cleanSport}`)
+        : null;
+    if (localArch === 'false') {
+      rm.isArchived = false;
+    } else if (localArch === 'true') {
+      rm.isArchived = true;
+    } else if (meta?.isArchived !== undefined) {
       rm.isArchived = meta.isArchived;
       rm.archivedAt = meta.archivedAt;
     }
@@ -1373,13 +1386,21 @@ export async function fetchAllRoomsWithDetails(
       }));
       const squads = Array.from(val.uniqueSquadsMap.values());
 
+      const localArch =
+        typeof localStorage !== 'undefined'
+          ? localStorage.getItem(`pixel_pros_room_archived_${val.roomCode}_${val.sport}`)
+          : null;
+      let finalArchived = Boolean(val.isArchived);
+      if (localArch === 'false') finalArchived = false;
+      else if (localArch === 'true') finalArchived = true;
+
       return {
         roomCode: val.roomCode,
         sport: val.sport,
         superstarsSquads,
         matches,
         squads,
-        isArchived: Boolean(val.isArchived),
+        isArchived: finalArchived,
         archivedAt: val.archivedAt,
       };
     })
@@ -2093,6 +2114,11 @@ export async function archiveRoom(
         `pixel_pros_room_archived_${cleanCode}_${cleanSport}`,
         isArchived ? 'true' : 'false'
       );
+      if (!isArchived) {
+        localStorage.setItem(`pixel_pros_room_archived_${cleanCode}`, 'false');
+        localStorage.removeItem(`pixel_pros_room_archived_${cleanCode}_nfl`);
+        localStorage.removeItem(`pixel_pros_room_archived_${cleanCode}_nba`);
+      }
     }
   } catch {}
 
