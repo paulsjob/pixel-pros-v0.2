@@ -13,6 +13,7 @@ import {
   deleteUserRoster,
   getSquadLockState,
   setSquadLockState,
+  toggleSquadLock,
   isGhostUser,
   fetchAllActiveRooms,
   registerActiveRoom,
@@ -848,26 +849,48 @@ export default function App() {
     showToast(`Cleared ${slotKey.toUpperCase()} slot.`);
   };
 
-  const handleToggleLock = () => {
+  const unlockCooldownRef = useRef<number>(0);
+
+  const handleUnlockSquad = () => {
+    if (!userName) return;
+    const currentSlate = activeSlateId;
+    const targetRoom = getEffectiveRoomCodeForSlate(roomCode, currentSlate);
+    unlockCooldownRef.current = Date.now();
+    setIsLocked(false);
+    setSquadLockState(targetRoom, userName, false, currentSport);
+    syncLineupToSupabase(roomCode, userName, squadSlots, false, currentSport, currentSlate);
+    toggleSquadLock(targetRoom, userName, false, currentSport).catch(() => {});
+    showToast(`PICKS UNLOCKED for ${userName}!`);
+  };
+
+  const handleLockSquad = (advanceToNext: boolean = true) => {
     if (!userName) {
       setIsAddSquadDrawerOpen(true);
       return;
     }
 
+    // Safety guard: if unlock was triggered less than 750ms ago, ignore lock attempt
+    // This completely prevents accidental double-click from unlocking and immediately re-locking/jumping!
+    if (Date.now() - unlockCooldownRef.current < 750) {
+      return;
+    }
+
     const filledCount = [squadSlots.star1, squadSlots.star2, squadSlots.star3].filter(Boolean).length;
-    if (!isLocked && filledCount < 3) {
+    if (filledCount < 3) {
       showToast('Select all 3 Stars before locking your squad!');
       return;
     }
 
     const currentSlate = activeSlateId;
     const targetRoom = getEffectiveRoomCodeForSlate(roomCode, currentSlate);
-    const nextLocked = !isLocked && filledCount === 3;
-    setIsLocked(nextLocked);
-    setSquadLockState(targetRoom, userName, nextLocked, currentSport);
-    syncLineupToSupabase(roomCode, userName, squadSlots, nextLocked, currentSport, currentSlate);
+    setIsLocked(true);
+    setSquadLockState(targetRoom, userName, true, currentSport);
+    syncLineupToSupabase(roomCode, userName, squadSlots, true, currentSport, currentSlate);
+    toggleSquadLock(targetRoom, userName, true, currentSport).catch(() => {});
 
-    if (nextLocked) {
+    const currentSlateLabel = currentSlate === 'SUPERSTARS' ? 'SUPERSTARS' : currentSlate;
+
+    if (advanceToNext) {
       // Find list of all game slates in EXACT CAROUSEL ORDER (sorted matches)
       const sorted = sortMatchesByKickoffAndStatus(matches || []);
       const matchSlates = sorted
@@ -880,17 +903,16 @@ export default function App() {
 
       const allSlates = ['SUPERSTARS', ...matchSlates];
       const currentIndex = allSlates.indexOf(currentSlate);
-      
-      // Advance to the immediately next game button in carousel sequence!
-      const nextIndex = (currentIndex >= 0 && currentIndex < allSlates.length - 1)
-        ? currentIndex + 1
-        : 0;
+
+      const nextIndex =
+        currentIndex >= 0 && currentIndex < allSlates.length - 1
+          ? currentIndex + 1
+          : 0;
       const nextSlate = allSlates[nextIndex];
 
-      const currentSlateLabel = currentSlate === 'SUPERSTARS' ? 'SUPERSTARS' : currentSlate;
-
       if (nextSlate && nextSlate !== currentSlate) {
-        const nextSlateLabel = nextSlate === 'SUPERSTARS' ? 'WEEKLY SUPERSTARS' : `GAME ${nextSlate.replace('@', ' @ ')}`;
+        const nextSlateLabel =
+          nextSlate === 'SUPERSTARS' ? 'WEEKLY SUPERSTARS' : `GAME ${nextSlate.replace('@', ' @ ')}`;
         showToast(`🔒 ${currentSlateLabel} LOCKED! Next Up: ${nextSlateLabel} ⭐`);
         setTimeout(() => {
           handleSelectSlate(nextSlate);
@@ -899,7 +921,15 @@ export default function App() {
         showToast(`🔒 ${currentSlateLabel} LOCKED! 🎉 ALL GAME SLATES COMPLETE!`);
       }
     } else {
-      showToast(`PICKS UNLOCKED for ${userName}!`);
+      showToast(`🔒 ${currentSlateLabel} SQUAD LOCKED!`);
+    }
+  };
+
+  const handleToggleLock = () => {
+    if (isLocked) {
+      handleUnlockSquad();
+    } else {
+      handleLockSquad(true);
     }
   };
 
@@ -1336,7 +1366,7 @@ export default function App() {
   const isCurrentSquadLocked =
     Boolean(userName) &&
     selectedPlayerIdsArray.length === 3 &&
-    Boolean(isLocked || getSquadLockState(currentEffectiveRoom, userName, currentSport));
+    Boolean(isLocked);
 
   const squadPillsData = useMemo(() => {
     const baseCode = (roomCode || 'COUCH').toUpperCase();
@@ -1722,6 +1752,8 @@ export default function App() {
                 onSelectSlot={(slotKey) => setActiveSlot(slotKey)}
                 onClearSlot={handleClearSlot}
                 onToggleLock={handleToggleLock}
+                onLockSquad={handleLockSquad}
+                onUnlockSquad={handleUnlockSquad}
                 onLockedSlotAttempt={() => showToast('Lineup is LOCKED!')}
                 onInspectPlayer={(player) => setDetailedPlayer(player)}
                 onRequestCreateSquad={() => setIsAddSquadDrawerOpen(true)}

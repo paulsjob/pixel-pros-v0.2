@@ -7,6 +7,7 @@ import { Users, Sparkles, ChevronLeft, ChevronRight, Trophy, ChevronDown, Chevro
 import { splitPlayerFirstLastName, formatPlayerInitialLastName, formatTeamPosSubtitle } from '../utils/formatters';
 import { getDeviceId } from '../lib/deviceIdentity';
 import { isGhostUser, getSquadLockState, fetchRoomRosters } from '../lib/supabaseClient';
+import { CentralLeagueLeaderboard } from './CentralLeagueLeaderboard';
 import {
   getPlayerScoringDisplay,
   resolvePlayerInPool,
@@ -70,6 +71,8 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
   onSwitchToPicks,
   isGameRoomMode = false,
 }) => {
+  // Top-level View Mode: 'central' (default), 'game_slates', 'top_players'
+  const [viewMode, setViewMode] = useState<'central' | 'game_slates' | 'top_players'>('central');
   // Two bold retro toggle buttons: [ FAMILY ] (default) and [ TOP SCORES ]
   const [activeTier, setActiveTier] = useState<'family' | 'top_scores'>('family');
   const [leagueSlateFilter, setLeagueSlateFilter] = useState<string>(() => {
@@ -547,7 +550,75 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
   };
 
   return (
-    <div className="leaderboard-column-wrapper w-full max-w-[680px] mx-auto px-2 sm:px-3 box-border flex flex-col items-stretch space-y-2.5 sm:space-y-3">
+    <div className="leaderboard-column-wrapper w-full max-w-4xl mx-auto px-1 sm:px-3 box-border flex flex-col items-stretch space-y-2.5 sm:space-y-3">
+      {/* 1. Master 3-Way Navigation Bar: [ 🏆 ALL GAMES CENTRAL ] [ 🏈 MATCHUP SLATES ] [ ⭐ TOP PLAYERS ] */}
+      <div className="w-full flex items-center justify-center gap-1.5 sm:gap-2 box-border p-1 bg-[#0b1a2e] border-2 border-[#1e3a5f] rounded-xs shadow-md">
+        <button
+          type="button"
+          onClick={() => setViewMode('central')}
+          className={`touch-manipulation flex-1 py-1.5 sm:py-2 px-2 sm:px-3 font-pixel text-[10px] sm:text-xs rounded-xs border-2 cursor-pointer transition-all flex items-center justify-center gap-1.5 font-bold ${
+            viewMode === 'central'
+              ? 'bg-[#ca8a04] text-[#451a03] border-[#fef08a] shadow-[0_2px_0_0_#713f12]'
+              : 'bg-[#1e293b] text-[#cbd5e1] border-[#334155] hover:text-white'
+          }`}
+        >
+          <Trophy size={14} className={viewMode === 'central' ? 'text-[#451a03]' : 'text-[#facc15]'} />
+          <span className="truncate">ALL GAMES</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setViewMode('game_slates');
+            setActiveTier('family');
+          }}
+          className={`touch-manipulation flex-1 py-1.5 sm:py-2 px-2 sm:px-3 font-pixel text-[10px] sm:text-xs rounded-xs border-2 cursor-pointer transition-all flex items-center justify-center gap-1.5 font-bold ${
+            viewMode === 'game_slates'
+              ? 'bg-[#12579b] text-[#fae5b8] border-[#38bdf8] shadow-[0_2px_0_0_#051a30]'
+              : 'bg-[#1e293b] text-[#cbd5e1] border-[#334155] hover:text-white'
+          }`}
+        >
+          <Users size={14} className={viewMode === 'game_slates' ? 'text-[#38bdf8]' : 'text-[#94a3b8]'} />
+          <span className="truncate">MATCHUPS</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setViewMode('top_players');
+            setActiveTier('top_scores');
+          }}
+          className={`touch-manipulation flex-1 py-1.5 sm:py-2 px-2 sm:px-3 font-pixel text-[10px] sm:text-xs rounded-xs border-2 cursor-pointer transition-all flex items-center justify-center gap-1.5 font-bold ${
+            viewMode === 'top_players'
+              ? 'bg-[#12579b] text-[#fae5b8] border-[#38bdf8] shadow-[0_2px_0_0_#051a30]'
+              : 'bg-[#1e293b] text-[#cbd5e1] border-[#334155] hover:text-white'
+          }`}
+        >
+          <Sparkles size={14} className={viewMode === 'top_players' ? 'text-[#facc15]' : 'text-[#94a3b8]'} />
+          <span className="truncate">TOP STARS</span>
+        </button>
+      </div>
+
+      {/* VIEW MODE A: CENTRALIZED MULTI-GAME LEADERBOARD */}
+      {viewMode === 'central' && (
+        <CentralLeagueLeaderboard
+          roomCode={roomCode}
+          userName={userName}
+          sport={sport}
+          matches={matches}
+          roomRosters={effectiveRoomRosters}
+          competitors={safeNflPlayers}
+          onSelectSlate={(slateId) => {
+            handleSelectSlateFilter(slateId);
+            setViewMode('game_slates');
+          }}
+          onOpenPlayerDetail={onOpenPlayerDetail}
+        />
+      )}
+
+      {/* VIEW MODES B & C: SINGLE GAME SLATES OR STAR PLAYERS */}
+      {viewMode !== 'central' && (
+        <>
       {/* 1. Single Clean Game Selector Bar (Flush width) */}
       <div className="w-full p-1 sm:p-1.5 bg-[#ecd7ab]/90 border-2 border-[#c99a57] rounded-xs shadow-inner box-border">
         <div className="relative flex items-center gap-1 w-full">
@@ -1237,6 +1308,8 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
         </div>
 
       </div>
+      </>
+      )}
 
       {/* Game Selector Hub Modal */}
       {showGameSelectorModal && (

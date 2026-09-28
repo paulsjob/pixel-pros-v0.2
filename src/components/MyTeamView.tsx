@@ -34,6 +34,8 @@ interface MyTeamViewProps {
   onSelectSlot: (slotKey: ActiveSlot) => void;
   onClearSlot: (slotKey: ActiveSlot) => void;
   onToggleLock?: () => void;
+  onLockSquad?: (advanceToNext?: boolean) => void;
+  onUnlockSquad?: () => void;
   onLockedSlotAttempt?: () => void;
   onInspectPlayer?: (player: Competitor) => void;
   onRequestCreateSquad?: () => void;
@@ -57,6 +59,8 @@ export const MyTeamView: React.FC<MyTeamViewProps> = ({
   onSelectSlot,
   onClearSlot,
   onToggleLock,
+  onLockSquad,
+  onUnlockSquad,
   onLockedSlotAttempt,
   onInspectPlayer,
   onRequestCreateSquad,
@@ -807,10 +811,13 @@ export const MyTeamView: React.FC<MyTeamViewProps> = ({
                   <span>[ SQUAD LOCKED ]</span>
                 </span>
               </div>
-              {onToggleLock && (
+              {(onUnlockSquad || onToggleLock) && (
                 <button
                   type="button"
-                  onClick={onToggleLock}
+                  onClick={() => {
+                    if (onUnlockSquad) onUnlockSquad();
+                    else if (onToggleLock) onToggleLock();
+                  }}
                   className="touch-manipulation px-2.5 py-1 md:px-5 md:py-2 bg-[#b91c1c] hover:bg-[#dc2626] text-white font-pixel text-[9px] md:text-xs border-2 border-[#7f1d1d] shadow-[0_1px_0_0_#450a0a] md:shadow-[0_3px_0_0_#450a0a] rounded-xs cursor-pointer transition-all whitespace-nowrap shrink-0 font-bold active:translate-y-0.5"
                   title="Unlock squad to make substitutions"
                 >
@@ -848,14 +855,31 @@ export const MyTeamView: React.FC<MyTeamViewProps> = ({
                   ⭐ READY!
                 </span>
               </div>
-              <button
-                type="button"
-                onClick={onToggleLock}
-                className="touch-manipulation w-full sm:w-auto sm:flex-1 py-1.5 md:py-3.5 px-3 md:px-8 bg-[#facc15] hover:bg-[#fde047] text-[#451a03] font-pixel text-[11px] md:text-base border-2 border-[#ca8a04] rounded-xs cursor-pointer shadow-[0_2px_0_0_#854d0e] md:shadow-[0_4px_0_0_#854d0e] active:translate-y-0.5 whitespace-nowrap text-center font-bold tracking-wider flex items-center justify-center gap-1.5 md:gap-2"
-              >
-                <span>⚡</span>
-                <span>LOCK SQUAD & NEXT GAME →</span>
-              </button>
+              <div className="flex items-center gap-2 w-full sm:w-auto sm:flex-1 justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onLockSquad) onLockSquad(false);
+                    else if (onToggleLock) onToggleLock();
+                  }}
+                  className="touch-manipulation py-1.5 md:py-2.5 px-3 md:px-5 bg-[#047857] hover:bg-[#059669] text-white font-pixel text-[10px] md:text-xs border-2 border-[#065f46] rounded-xs cursor-pointer shadow-[0_2px_0_0_#022c22] md:shadow-[0_3px_0_0_#022c22] active:translate-y-0.5 whitespace-nowrap font-bold tracking-wider"
+                  title="Lock squad and stay on this matchup"
+                >
+                  🔒 LOCK SQUAD
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onLockSquad) onLockSquad(true);
+                    else if (onToggleLock) onToggleLock();
+                  }}
+                  className="touch-manipulation flex-1 sm:flex-initial py-1.5 md:py-2.5 px-3 md:px-6 bg-[#facc15] hover:bg-[#fde047] text-[#451a03] font-pixel text-[10px] md:text-xs border-2 border-[#ca8a04] rounded-xs cursor-pointer shadow-[0_2px_0_0_#854d0e] md:shadow-[0_3px_0_0_#854d0e] active:translate-y-0.5 whitespace-nowrap font-bold tracking-wider flex items-center justify-center gap-1.5"
+                  title="Lock squad and advance to next game in sequence"
+                >
+                  <span>⚡</span>
+                  <span>LOCK & NEXT GAME →</span>
+                </button>
+              </div>
             </div>
           ) : (
             <button

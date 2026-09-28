@@ -131,8 +131,7 @@ async function syncWithSupabase(roomCodeFilter?: string) {
       const isLocked = Boolean(
         row.is_locked === true ||
         String(row.is_locked) === 'true' ||
-        String(row.device_id).toUpperCase() === 'LOCKED' ||
-        dbState.locks[lockKey] === true
+        String(row.device_id).toUpperCase() === 'LOCKED'
       );
 
       const existingIdx = dbState.rosters.findIndex(
@@ -341,7 +340,7 @@ app.post('/api/rosters', (req: Request, res: Response) => {
   );
   const distinctIds = new Set(starIds);
   const hasThreeDistinct = starIds.length === 3 && distinctIds.size === 3;
-  const guardedLocked = hasThreeDistinct && (Boolean(is_locked) || (existingRoster?.is_locked && !force_clear));
+  const guardedLocked = hasThreeDistinct && (typeof is_locked === 'boolean' ? is_locked : Boolean(existingRoster?.is_locked && !force_clear));
 
   const lockKey = `${cleanRoom}_${cleanUser}_${cleanSport}`;
   dbState.locks[lockKey] = guardedLocked;
@@ -374,23 +373,24 @@ app.post('/api/rosters', (req: Request, res: Response) => {
 
   // Sync to Supabase in background
   if (serverSupabase) {
-    serverSupabase
-      .from('user_rosters')
-      .upsert(
-        {
-          room_code: cleanRoom,
-          user_name: cleanUser,
-          sport: cleanSport,
-          star_1_id: star_1_id || '',
-          star_2_id: star_2_id || '',
-          star_3_id: star_3_id || '',
-          is_locked: guardedLocked,
-          device_id: guardedLocked ? 'LOCKED' : 'UNLOCKED',
-          updated_at: updatedRecord.updated_at,
-        },
-        { onConflict: 'room_code,user_name,sport' }
-      )
-      .catch((sbErr: any) => console.warn('Supabase upsert sync error from Express:', sbErr));
+    Promise.resolve(
+      serverSupabase
+        .from('user_rosters')
+        .upsert(
+          {
+            room_code: cleanRoom,
+            user_name: cleanUser,
+            sport: cleanSport,
+            star_1_id: finalS1,
+            star_2_id: finalS2,
+            star_3_id: finalS3,
+            is_locked: guardedLocked,
+            device_id: guardedLocked ? 'LOCKED' : 'UNLOCKED',
+            updated_at: updatedRecord.updated_at,
+          },
+          { onConflict: 'room_code,user_name,sport' }
+        )
+    ).catch((sbErr: any) => console.warn('Supabase upsert sync error from Express:', sbErr));
   }
 
   res.json({ success: true, data: updatedRecord });
@@ -425,12 +425,13 @@ app.delete('/api/rosters', (req: Request, res: Response) => {
   broadcastRoomUpdate(cleanRoom, cleanSport, { action: 'delete', user_name: cleanUser });
 
   if (serverSupabase) {
-    serverSupabase
-      .from('user_rosters')
-      .delete()
-      .eq('room_code', cleanRoom)
-      .eq('user_name', cleanUser)
-      .catch(() => {});
+    Promise.resolve(
+      serverSupabase
+        .from('user_rosters')
+        .delete()
+        .eq('room_code', cleanRoom)
+        .eq('user_name', cleanUser)
+    ).catch(() => {});
   }
 
   res.json({ success: true });
@@ -501,6 +502,7 @@ app.post('/api/rosters/reset', (req: Request, res: Response) => {
 app.post('/api/rosters/lock', (req: Request, res: Response) => {
   const { room_code, user_name, is_locked, sport = 'nfl', all = false } = req.body;
   const cleanRoom = (room_code || 'COUCH').trim().toUpperCase();
+  const cleanUser = (user_name || '').trim().toUpperCase();
   const cleanSport = sport === 'nba' ? 'nba' : 'nfl';
   const lockedBool = Boolean(is_locked);
 
@@ -517,7 +519,6 @@ app.post('/api/rosters/lock', (req: Request, res: Response) => {
       }
     });
   } else {
-    const cleanUser = (user_name || '').trim().toUpperCase();
     if (!cleanUser) {
       res.status(400).json({ success: false, error: 'user_name required' });
       return;
@@ -540,6 +541,35 @@ app.post('/api/rosters/lock', (req: Request, res: Response) => {
 
   saveDatabase(dbState);
   broadcastRoomUpdate(cleanRoom, cleanSport, { action: 'lock', is_locked: lockedBool, all });
+
+  if (serverSupabase) {
+    if (all) {
+      Promise.resolve(
+        serverSupabase
+          .from('user_rosters')
+          .update({
+            is_locked: lockedBool,
+            device_id: lockedBool ? 'LOCKED' : 'UNLOCKED',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('room_code', cleanRoom)
+          .eq('sport', cleanSport)
+      ).catch(() => {});
+    } else {
+      Promise.resolve(
+        serverSupabase
+          .from('user_rosters')
+          .update({
+            is_locked: lockedBool,
+            device_id: lockedBool ? 'LOCKED' : 'UNLOCKED',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('room_code', cleanRoom)
+          .eq('user_name', cleanUser)
+          .eq('sport', cleanSport)
+      ).catch(() => {});
+    }
+  }
 
   res.json({ success: true });
 });
