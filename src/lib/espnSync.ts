@@ -83,29 +83,68 @@ function setLastESPNSyncTime(sport: SportId) {
 }
 
 /**
+ * Calculates the calendar-based NFL week according to the official Tuesday 4:00 AM EDT rollover.
+ * Week 1 begins Tuesday Sep 8, 2026 at 4:00 AM EDT (08:00 UTC).
+ * Rolls forward every 7 days precisely on Tuesday morning.
+ */
+export function getCalendarNFLWeek(now: Date = new Date()): number {
+  const week1Tuesday = new Date('2026-09-08T08:00:00Z').getTime();
+  const diffMs = now.getTime() - week1Tuesday;
+  if (diffMs < 0) return 1;
+  const weekMs = 7 * 24 * 60 * 60 * 1000;
+  const weekNum = Math.floor(diffMs / weekMs) + 1;
+  return Math.min(Math.max(weekNum, 1), 18);
+}
+
+/**
  * Returns the active NFL week number that the app is currently on.
- * Strictly guarantees no past or future week games bleed through.
+ * Automatically advances when Tuesday 4:00 AM EDT has passed, guaranteeing
+ * no phone or desktop is trapped on previous weeks.
  */
 export function getCurrentNFLWeek(): number {
+  const calendarWeek = getCalendarNFLWeek();
   try {
     const saved = localStorage.getItem('pixel_pros_current_nfl_week');
     if (saved) {
       const parsed = parseInt(saved, 10);
-      if (!isNaN(parsed) && parsed >= 3) return parsed;
+      if (!isNaN(parsed) && parsed >= calendarWeek) {
+        return parsed;
+      } else if (!isNaN(parsed) && parsed < calendarWeek) {
+        // Roll over detected: clear previous week match cache so fresh week matches take precedence
+        localStorage.removeItem('pixel_pros_synced_matches_nfl');
+      }
     }
   } catch {
     // ignore
   }
-  return 3; // Default to active NFL Week 3
+
+  try {
+    localStorage.setItem('pixel_pros_current_nfl_week', String(calendarWeek));
+    localStorage.setItem('pixel_pros_current_nfl_week_label', `Week ${calendarWeek}`);
+  } catch {}
+  return calendarWeek;
 }
 
 export function setCurrentNFLWeek(weekNumber: number) {
   try {
+    const prev = localStorage.getItem('pixel_pros_current_nfl_week');
+    if (prev && prev !== String(weekNumber)) {
+      // Clear old matches cache when moving to a new week
+      localStorage.removeItem('pixel_pros_synced_matches_nfl');
+    }
     localStorage.setItem('pixel_pros_current_nfl_week', String(weekNumber));
     localStorage.setItem('pixel_pros_current_nfl_week_label', `Week ${weekNumber}`);
   } catch {
     // ignore
   }
+}
+
+export function setManualNFLWeek(weekNumber: number) {
+  try {
+    localStorage.removeItem('pixel_pros_synced_matches_nfl');
+    localStorage.setItem('pixel_pros_current_nfl_week', String(weekNumber));
+    localStorage.setItem('pixel_pros_current_nfl_week_label', `Week ${weekNumber}`);
+  } catch {}
 }
 
 /**

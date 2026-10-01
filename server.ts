@@ -272,20 +272,55 @@ app.get('/api/realtime', (req: Request, res: Response) => {
   });
 });
 
-// 3. Fetch rosters for a room
-app.get('/api/rosters', async (req: Request, res: Response) => {
-  const isAll = req.query.all === 'true' || req.query.roomCode === '*';
-  const roomCode = req.query.roomCode ? String(req.query.roomCode).trim().toUpperCase() : (isAll ? '*' : 'COUCH');
+// SSE endpoint alias for client listeners connecting to /api/events
+app.get('/api/events', (req: Request, res: Response) => {
+  const roomCode = req.query.roomCode ? String(req.query.roomCode).trim().toUpperCase() : '*';
   const sport = req.query.sport ? String(req.query.sport).trim().toLowerCase() : '';
 
-  if (!isAll) {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+
+  const id = ++sseClientId;
+  sseClients.set(id, { id, res, roomCode, sport });
+
+  res.write(`: connected id=${id}\n\n`);
+
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(': ping\n\n');
+    } catch {
+      clearInterval(heartbeat);
+      sseClients.delete(id);
+    }
+  }, 15000);
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    sseClients.delete(id);
+  });
+});
+
+// 3. Fetch rosters for a room or entire league
+app.get('/api/rosters', async (req: Request, res: Response) => {
+  const isAll = req.query.all === 'true' || req.query.roomCode === '*';
+  const league = req.query.league ? String(req.query.league).trim().toUpperCase() : '';
+  const roomCode = req.query.roomCode ? String(req.query.roomCode).trim().toUpperCase() : (isAll || league ? '' : 'COUCH');
+  const sport = req.query.sport ? String(req.query.sport).trim().toLowerCase() : '';
+
+  if (!isAll && roomCode) {
     await syncWithSupabase(roomCode);
   }
 
   const results = dbState.rosters.filter((r) => {
     const rRoom = (r.room_code || '').trim().toUpperCase();
     const rSport = (r.sport || 'nfl').trim().toLowerCase();
-    const isRoomMatch = isAll || rRoom === roomCode || rRoom.startsWith(`${roomCode}__`);
+    const isLeagueMatch = league
+      ? rRoom === league || rRoom.startsWith(`${league}_`) || rRoom.startsWith(`${league}__`)
+      : false;
+    const isRoomMatch = isAll || isLeagueMatch || (roomCode ? rRoom === roomCode || rRoom.startsWith(`${roomCode}__`) : false);
     return isRoomMatch && (sport ? rSport === sport : true);
   });
 
@@ -889,7 +924,7 @@ app.get('/api/espn/scoreboard', async (req: Request, res: Response) => {
     if (sport === 'nfl') {
       params.set('seasontype', seasonType);
       // If client requests a week, use it; otherwise use the current active week
-      const targetWeek = week || String(weeklyRescanState.lastRescanWeek || 3);
+      const targetWeek = week || String(weeklyRescanState.lastRescanWeek || getCalendarNFLWeekServer());
       params.set('week', targetWeek);
     }
     const fullUrl = `${baseUrl}?${params.toString()}`;
@@ -1088,6 +1123,16 @@ function getNextTuesday4AMEST(now = new Date()): Date {
   return new Date(last.getTime() + 7 * 86400000);
 }
 
+// Official Calendar NFL Week Calculation (Week 1 begins Tuesday Sep 8, 2026 4:00 AM EDT)
+function getCalendarNFLWeekServer(now = new Date()): number {
+  const week1Tuesday = new Date('2026-09-08T08:00:00Z').getTime();
+  const diffMs = now.getTime() - week1Tuesday;
+  if (diffMs < 0) return 1;
+  const weekMs = 7 * 24 * 60 * 60 * 1000;
+  const weekNum = Math.floor(diffMs / weekMs) + 1;
+  return Math.min(Math.max(weekNum, 1), 18);
+}
+
 // Rescan State
 interface WeeklyRescanState {
   lastRescanTimestamp: string;
@@ -1097,38 +1142,40 @@ interface WeeklyRescanState {
 
 let weeklyRescanState: WeeklyRescanState = {
   lastRescanTimestamp: '',
-  lastRescanWeek: 3,
+  lastRescanWeek: getCalendarNFLWeekServer(),
   inProgress: false,
 };
 
-async function executeWeeklyTuesdayRescan(isForced = false): Promise<{ success: boolean; week: number; message: string }> {
+async function executeWeeklyTuesdayRescan(isForced = false, targetWeekOverride?: number): Promise<{ success: boolean; week: number; message: string }> {
   if (weeklyRescanState.inProgress) {
     return { success: false, week: weeklyRescanState.lastRescanWeek, message: 'Rescan already in progress' };
   }
   weeklyRescanState.inProgress = true;
-  console.log(`[Weekly Rescan] Initiating Tuesday 4:00 AM EST full data rescan (forced: ${isForced})...`);
+  console.log(`[Weekly Rescan] Initiating Tuesday 4:00 AM EST full data rescan (forced: ${isForced}, override: ${targetWeekOverride})...`);
 
   try {
-    // 1. Fetch fresh scoreboard from ESPN to determine the new week
-    let newWeek = weeklyRescanState.lastRescanWeek || 3;
-    try {
-      const res = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?week=${newWeek}`);
-      if (res.ok) {
-        const data = await res.json();
-        const allCompleted = Array.isArray(data.events) && data.events.length > 0 &&
-          data.events.every((ev: any) => ev.status?.type?.state === 'post' || ev.status?.type?.completed);
-        if (allCompleted) {
-          newWeek = (data.week?.number || newWeek) + 1;
-        } else {
-          newWeek = data.week?.number || newWeek;
+    // 1. Fetch fresh scoreboard from ESPN to determine the new week or use manual override
+    let newWeek = targetWeekOverride || weeklyRescanState.lastRescanWeek || getCalendarNFLWeekServer();
+    if (!targetWeekOverride) {
+      try {
+        const res = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?week=${newWeek}`);
+        if (res.ok) {
+          const data = await res.json();
+          const allCompleted = Array.isArray(data.events) && data.events.length > 0 &&
+            data.events.every((ev: any) => ev.status?.type?.state === 'post' || ev.status?.type?.completed);
+          if (allCompleted) {
+            newWeek = (data.week?.number || newWeek) + 1;
+          } else {
+            newWeek = data.week?.number || newWeek;
+          }
         }
+      } catch {
+        // fallback
       }
-    } catch {
-      // fallback
     }
 
     // 2. Sync games to Supabase matches table
-    await syncESPNToSupabase();
+    await syncESPNToSupabase(newWeek);
 
     // 3. Reset lock states on rosters for the fresh week so family members can make new picks
     for (const k of Object.keys(dbState.locks)) {
@@ -1167,11 +1214,13 @@ async function executeWeeklyTuesdayRescan(isForced = false): Promise<{ success: 
     const payload = JSON.stringify({
       type: 'weekly_rescan_completed',
       week: newWeek,
+      activeWeek: newWeek,
       timestamp: weeklyRescanState.lastRescanTimestamp,
       message: `Week ${newWeek} slate is active! Ready for new squad picks.`,
     });
     for (const client of sseClients.values()) {
       try {
+        client.res.write(`event: tuesday_rescan_completed\ndata: ${payload}\n\n`);
         client.res.write(`data: ${payload}\n\n`);
       } catch {
         // ignore
@@ -1227,13 +1276,29 @@ app.get('/api/espn/rescan-status', (req: Request, res: Response) => {
 
 // Force rescan endpoint (Commissioner button or test)
 app.post('/api/espn/rescan-weekly', async (req: Request, res: Response) => {
-  const result = await executeWeeklyTuesdayRescan(true);
+  const weekArg = req.body?.week || req.query?.week;
+  const targetWeek = weekArg ? parseInt(String(weekArg), 10) : undefined;
+  const result = await executeWeeklyTuesdayRescan(true, targetWeek);
+  res.json(result);
+});
+
+// Force manual week advance / set endpoint
+app.post('/api/espn/set-week', async (req: Request, res: Response) => {
+  const weekArg = req.body?.week || req.query?.week;
+  const targetWeek = weekArg ? parseInt(String(weekArg), 10) : undefined;
+  if (!targetWeek || isNaN(targetWeek) || targetWeek < 1 || targetWeek > 18) {
+    res.status(400).json({ error: 'Valid week number (1-18) required' });
+    return;
+  }
+  const result = await executeWeeklyTuesdayRescan(true, targetWeek);
   res.json(result);
 });
 
 app.post('/api/espn/sync', async (req: Request, res: Response) => {
   try {
-    const result = await syncESPNToSupabase();
+    const weekArg = req.body?.week || req.query?.week;
+    const targetWeek = weekArg ? parseInt(String(weekArg), 10) : undefined;
+    const result = await syncESPNToSupabase(targetWeek);
     res.json({ success: true, message: `ESPN active week matches synced to Supabase successfully`, result });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -1243,7 +1308,7 @@ app.post('/api/espn/sync', async (req: Request, res: Response) => {
 // -------------------------------------------------------------
 // Background Poller: Writes real ESPN current active week games to Supabase
 // -------------------------------------------------------------
-async function syncESPNToSupabase() {
+async function syncESPNToSupabase(targetWeekNumber?: number) {
   try {
     const supabaseUrl = process.env.VITE_SUPABASE_URL || 'https://iugxryuapgocygjckxve.supabase.co';
     const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1Z3hyeXVhcGdvY3lnamNreHZlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDIwNDQzMDMsImV4cCI6MjA1NzYyMDMwM30.4i4n4wHwM9uPms3xGv0_oPjWbF_K0Y8l7p4m1Q2k5zM';
@@ -1252,9 +1317,8 @@ async function syncESPNToSupabase() {
     const { createClient } = await import('@supabase/supabase-js');
     const sb = createClient(supabaseUrl, supabaseKey);
 
-    // Fetch ESPN scoreboard without hardcoding a week; ESPN authoritatively holds the current active week
-    // until the last game (Monday Night Football) completes!
-    const res = await fetch('https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard');
+    const activeWk = targetWeekNumber || weeklyRescanState.lastRescanWeek || getCalendarNFLWeekServer();
+    const res = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?week=${activeWk}`);
     if (!res.ok) return;
     const data = await res.json();
     if (!Array.isArray(data.events)) return;

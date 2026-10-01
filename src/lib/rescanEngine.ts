@@ -12,7 +12,7 @@
 
 import { SportId, Competitor, Match } from '../types';
 import { runPureDynamicDepthChartSync } from './espnDepthChartSync';
-import { getCurrentNFLWeek, setCurrentNFLWeek } from './espnSync';
+import { getCurrentNFLWeek, setCurrentNFLWeek, syncESPNData } from './espnSync';
 import { isSupabaseConfigured, supabase } from './supabaseClient';
 
 export interface InjuryReportItem {
@@ -248,42 +248,60 @@ export function getCachedNFLInjuries(): Map<string, InjuryReportItem> {
 // -------------------------------------------------------------
 
 export async function executeCompleteWeeklyRescan(
-  onProgress?: (step: string) => void
+  onProgress?: (step: string) => void,
+  targetWeek?: number
 ): Promise<WeeklyRescanSummary> {
   onProgress?.('Contacting ESPN for upcoming NFL week schedule...');
 
   try {
     // 1. Trigger server-side weekly rescan endpoint if available
     try {
-      await fetch('/api/espn/rescan-weekly', { method: 'POST' });
+      await fetch('/api/espn/rescan-weekly', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(targetWeek ? { week: targetWeek } : {}),
+      });
     } catch {
       // server-side rescan call is optional in client-only fallback
     }
 
     // 2. Fetch live scoreboard to identify active week
-    let upcomingWeek = getCurrentNFLWeek();
-    try {
-      const scoreRes = await fetch('/api/espn/scoreboard?sport=nfl');
-      if (scoreRes.ok) {
-        const scoreData = await scoreRes.json();
-        if (scoreData.week?.number) {
-          upcomingWeek = scoreData.week.number;
-          setCurrentNFLWeek(upcomingWeek);
+    let upcomingWeek = targetWeek || getCurrentNFLWeek();
+    if (targetWeek) {
+      setCurrentNFLWeek(targetWeek);
+    } else {
+      try {
+        const scoreRes = await fetch('/api/espn/scoreboard?sport=nfl');
+        if (scoreRes.ok) {
+          const scoreData = await scoreRes.json();
+          if (scoreData.week?.number) {
+            upcomingWeek = scoreData.week.number;
+            setCurrentNFLWeek(upcomingWeek);
+          }
         }
+      } catch (e) {
+        console.warn('Could not query scoreboard for week:', e);
       }
-    } catch (e) {
-      console.warn('Could not query scoreboard for week:', e);
     }
 
-    // 3. Fetch live injuries
+    // 3. Clear old matches cache and fetch authoritative ESPN matches & scores for the active week
+    onProgress?.(`Syncing official NFL Week ${upcomingWeek} matchups from ESPN...`);
+    try {
+      localStorage.removeItem('pixel_pros_synced_matches_nfl');
+      await syncESPNData('nfl');
+    } catch (syncErr) {
+      console.warn('Could not sync ESPN matches during rescan:', syncErr);
+    }
+
+    // 4. Fetch live injuries
     onProgress?.('Fetching live NFL injury reports across all 32 teams...');
     const injuryMap = await fetchLiveNFLInjuries();
 
-    // 4. Scrape dynamic depth charts across all 32 teams
+    // 5. Scrape dynamic depth charts across all 32 teams
     onProgress?.(`Re-scanning all 32 NFL depth charts for Week ${upcomingWeek}...`);
     const depthResult = await runPureDynamicDepthChartSync(onProgress);
 
-    // 5. Apply injury reports and depth labels to synced competitors
+    // 6. Apply injury reports and depth labels to synced competitors
     const rawCompetitors = localStorage.getItem('pixel_pros_synced_competitors_nfl');
     let competitorsCount = 0;
     if (rawCompetitors) {
@@ -304,7 +322,7 @@ export async function executeCompleteWeeklyRescan(
       }
     }
 
-    // 6. Record timestamp and broadcast client-side
+    // 7. Record timestamp and broadcast client-side
     const nowIso = new Date().toISOString();
     localStorage.setItem('pixel_pros_last_tuesday_rescan', nowIso);
 

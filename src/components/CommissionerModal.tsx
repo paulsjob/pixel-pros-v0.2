@@ -31,7 +31,7 @@ import {
   ArchiveRestore,
   Play,
 } from 'lucide-react';
-import { SportId, UserRoster } from '../types';
+import { SportId, UserRoster, Match } from '../types';
 import {
   deleteUserRoster,
   resetRoomRosters,
@@ -51,7 +51,7 @@ import {
   deleteRoomPermanently,
   purgeAllArchivedRooms,
 } from '../lib/supabaseClient';
-import { syncESPNData, getLastESPNSyncTime, getCurrentNFLWeek } from '../lib/espnSync';
+import { syncESPNData, getLastESPNSyncTime, getCurrentNFLWeek, setManualNFLWeek } from '../lib/espnSync';
 import { runPureDynamicDepthChartSync } from '../lib/espnDepthChartSync';
 import { executeCompleteWeeklyRescan, getWeeklyRescanCountdown } from '../lib/rescanEngine';
 import { DEFAULT_NFL_MATCHES, NFL_TEAMS, getTeamFullName, DEFAULT_NFL_COMPETITORS, resolvePlayerInPool } from '../utils/teamData';
@@ -65,6 +65,7 @@ interface CommissionerModalProps {
   currentRoom: string;
   currentSport: SportId;
   roomRosters: UserRoster[];
+  matches?: Match[];
   onSwitchRoom: (newRoom: string, newSport?: SportId) => void;
   onRefreshData: () => void;
   showToast: (msg: string) => void;
@@ -76,6 +77,7 @@ export const CommissionerModal: React.FC<CommissionerModalProps> = ({
   currentRoom,
   currentSport,
   roomRosters,
+  matches,
   onSwitchRoom,
   onRefreshData,
   showToast,
@@ -107,9 +109,24 @@ export const CommissionerModal: React.FC<CommissionerModalProps> = ({
   const [depthSyncProgress, setDepthSyncProgress] = useState<string | null>(null);
 
   // Tuesday 4:00 AM EST Rescan Engine State
+  const activeWeekNum = getCurrentNFLWeek();
+  const [selectedManualWeek, setSelectedManualWeek] = useState<number>(() => activeWeekNum);
+  const [switchingWeek, setSwitchingWeek] = useState<boolean>(false);
   const [weeklyRescanLoading, setWeeklyRescanLoading] = useState(false);
   const [weeklyRescanStatus, setWeeklyRescanStatus] = useState<string | null>(null);
   const [rescanCountdown, setRescanCountdown] = useState(() => getWeeklyRescanCountdown());
+
+  useEffect(() => {
+    setSelectedManualWeek(activeWeekNum);
+  }, [activeWeekNum]);
+
+  const currentWeekMatches = useMemo(() => {
+    if (matches && matches.length > 0) {
+      const filtered = matches.filter((m) => !m.week || m.week === activeWeekNum);
+      if (filtered.length > 0) return filtered;
+    }
+    return DEFAULT_NFL_MATCHES.filter((m) => !m.week || m.week === activeWeekNum);
+  }, [matches, activeWeekNum]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -464,15 +481,42 @@ export const CommissionerModal: React.FC<CommissionerModalProps> = ({
     }
   };
 
-  const handleTriggerWeeklyRescan = async () => {
-    setWeeklyRescanLoading(true);
-    setWeeklyRescanStatus('Starting Tuesday 4:00 AM EST full rescan...');
+  const handleManualSetWeek = async (targetWeek: number) => {
+    setSwitchingWeek(true);
+    showToast(`Advancing to NFL Week ${targetWeek} & syncing live ESPN schedule...`);
     try {
-      const res = await executeCompleteWeeklyRescan((msg) => setWeeklyRescanStatus(msg));
+      // 1. Tell server to switch week and clear squad locks
+      await fetch('/api/espn/set-week', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ week: targetWeek }),
+      });
+      // 2. Set client local week & clear old week match cache
+      setManualNFLWeek(targetWeek);
+      // 3. Immediately pull live ESPN schedule & stats for that target week
+      await syncESPNData('nfl');
+      // 4. Trigger UI refresh and rooms refresh
+      onRefreshData();
+      await refreshMasterRooms();
+      showToast(`⚡ Successfully moved to NFL Week ${targetWeek}! 16 matchups loaded.`);
+    } catch (err: any) {
+      showToast(`Failed to switch week: ${err.message}`);
+    } finally {
+      setSwitchingWeek(false);
+    }
+  };
+
+  const handleTriggerWeeklyRescan = async (forcedWeek?: number | React.MouseEvent) => {
+    setWeeklyRescanLoading(true);
+    const targetWk = typeof forcedWeek === 'number' ? forcedWeek : (selectedManualWeek || activeWeekNum);
+    setWeeklyRescanStatus(`Starting Tuesday 4:00 AM EST full rescan for Week ${targetWk}...`);
+    try {
+      const res = await executeCompleteWeeklyRescan((msg) => setWeeklyRescanStatus(msg), targetWk);
       if (res.success) {
         showToast(`Tuesday 4:00 AM Rescan complete! Active: Week ${res.activeWeek}`);
         setWeeklyRescanStatus(`Success: Active Week ${res.activeWeek} • ${res.injuriesFound} injuries tracked • ${res.competitorsUpdated} athletes updated`);
         onRefreshData();
+        refreshMasterRooms();
       } else {
         showToast(`Rescan notice: ${res.message}`);
         setWeeklyRescanStatus(`Notice: ${res.message}`);
@@ -483,6 +527,42 @@ export const CommissionerModal: React.FC<CommissionerModalProps> = ({
     } finally {
       setWeeklyRescanLoading(false);
     }
+  };
+
+  const handleClearPastWeekSlates = async (roomCode: string, sport: SportId) => {
+    const room = allRooms.find((r) => r.roomCode === roomCode && r.sport === sport);
+    if (!room || !room.matches || room.matches.length === 0) {
+      showToast('No game slates in this room to clear');
+      return;
+    }
+    const currentWeekPairs = new Set(
+      currentWeekMatches.map((m) => `${(m.awayTeamCode || m.away_team || '').trim().toUpperCase()}@${(m.homeTeamCode || m.home_team || '').trim().toUpperCase()}`)
+    );
+    const staleSlates = room.matches.filter((m) => {
+      const pair = (m.matchSlateId || '').trim().toUpperCase();
+      const [away, home] = pair.split('@');
+      const invPair = `${home}@${away}`;
+      return !currentWeekPairs.has(pair) && !currentWeekPairs.has(invPair);
+    });
+
+    if (staleSlates.length === 0) {
+      showToast('All game slates in this room belong to the active week!');
+      return;
+    }
+
+    for (const slate of staleSlates) {
+      await deleteRoomPermanently(slate.effectiveRoomCode, sport);
+    }
+    showToast(`Cleared ${staleSlates.length} past-week slates from room ${roomCode}!`);
+    onRefreshData();
+    refreshMasterRooms();
+  };
+
+  const handleDeleteSingleSlate = async (effectiveRoomCode: string, sport: SportId, slateId: string) => {
+    await deleteRoomPermanently(effectiveRoomCode, sport);
+    showToast(`Deleted game slate ${slateId} (${effectiveRoomCode})`);
+    onRefreshData();
+    refreshMasterRooms();
   };
 
   const handleStartRename = (room: string, sport: SportId, squad: string) => {
@@ -1407,43 +1487,97 @@ export const CommissionerModal: React.FC<CommissionerModalProps> = ({
                                 </div>
 
                                 {/* SECTION 2: 🏈 MATCH SLATES */}
-                                <div className="bg-slate-900/70 rounded-lg border border-blue-500/20 p-3 space-y-2.5">
-                                  <div className="flex items-center justify-between pb-2 border-b border-blue-500/20">
-                                    <div className="flex items-center gap-2">
-                                      <span className="text-sm">🏈</span>
-                                      <span className="text-xs font-bold text-blue-300 uppercase tracking-wide">
-                                        MATCH SLATES ({room.matches?.length || 0} Games Drafted)
-                                      </span>
-                                    </div>
-                                    <span className="text-[10px] text-blue-400/80 font-medium bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20">
-                                      Head-to-head game picks
-                                    </span>
-                                  </div>
+                                {(() => {
+                                  const currentWeekPairs = new Set(
+                                    currentWeekMatches.map((cm) => `${(cm.awayTeamCode || cm.away_team || '').trim().toUpperCase()}@${(cm.homeTeamCode || cm.home_team || '').trim().toUpperCase()}`)
+                                  );
+                                  const staleSlatesCount = (room.matches || []).filter((m) => {
+                                    const p = (m.matchSlateId || '').trim().toUpperCase();
+                                    const [a, h] = p.split('@');
+                                    return !currentWeekPairs.has(p) && !currentWeekPairs.has(`${h}@${a}`);
+                                  }).length;
 
-                                  {(!room.matches || room.matches.length === 0) ? (
-                                    <div className="text-xs text-slate-500 italic py-2 pl-2">
-                                      No specific game slate picks drafted yet in this room. (When players pick for games like ATL@GB, they appear here!)
-                                    </div>
-                                  ) : (
-                                    <div className="space-y-3">
-                                      {room.matches.map((m) => (
-                                        <div
-                                          key={m.matchSlateId}
-                                          className="p-2.5 sm:p-3 rounded-lg bg-slate-900 border border-slate-800 space-y-2"
-                                        >
-                                          <div className="flex items-center justify-between pb-1.5 border-b border-slate-800/70">
-                                            <div className="flex items-center gap-2">
-                                              <span className="text-xs font-bold text-slate-100 font-mono">
-                                                🏈 GAME: {m.matchSlateId}
-                                              </span>
-                                              <span className="text-[10px] text-slate-500 font-mono">
-                                                ({m.effectiveRoomCode})
-                                              </span>
-                                            </div>
-                                            <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 font-medium">
-                                              {m.squads.length} {m.squads.length === 1 ? 'Squad' : 'Squads'}
+                                  return (
+                                    <div className="bg-slate-900/70 rounded-lg border border-blue-500/20 p-3 space-y-2.5">
+                                      <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-2 border-b border-blue-500/20 gap-2">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                          <span className="text-sm">🏈</span>
+                                          <span className="text-xs font-bold text-blue-300 uppercase tracking-wide">
+                                            MATCH SLATES ({room.matches?.length || 0} Games Drafted)
+                                          </span>
+                                          {staleSlatesCount > 0 && (
+                                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-600/40 font-bold">
+                                              {staleSlatesCount} Past-Week (Old)
                                             </span>
-                                          </div>
+                                          )}
+                                        </div>
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                          {staleSlatesCount > 0 && (
+                                            <button
+                                              type="button"
+                                              onClick={() => handleClearPastWeekSlates(room.roomCode, room.sport)}
+                                              className="text-[10px] px-2 py-0.5 rounded bg-amber-600/30 hover:bg-amber-600/50 text-amber-200 border border-amber-500/40 font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                                              title="Clear slates from past weeks (e.g. ATL@GB)"
+                                            >
+                                              <Trash2 size={10} />
+                                              <span>Clear {staleSlatesCount} Old Slates</span>
+                                            </button>
+                                          )}
+                                          <span className="text-[10px] text-blue-400/80 font-medium bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20">
+                                            Head-to-head game picks
+                                          </span>
+                                        </div>
+                                      </div>
+
+                                      {(!room.matches || room.matches.length === 0) ? (
+                                        <div className="text-xs text-slate-500 italic py-2 pl-2">
+                                          No specific game slate picks drafted yet in this room for active Week {activeWeekNum}. (When players pick for active games like TNF {currentWeekMatches[0]?.awayTeamCode || 'PIT'}@{currentWeekMatches[0]?.homeTeamCode || 'CLE'}, they appear here!)
+                                        </div>
+                                      ) : (
+                                        <div className="space-y-3">
+                                          {room.matches.map((m) => {
+                                            const p = (m.matchSlateId || '').trim().toUpperCase();
+                                            const [a, h] = p.split('@');
+                                            const isPastSlate = !currentWeekPairs.has(p) && !currentWeekPairs.has(`${h}@${a}`);
+
+                                            return (
+                                              <div
+                                                key={m.matchSlateId}
+                                                className={`p-2.5 sm:p-3 rounded-lg border space-y-2 ${isPastSlate ? 'bg-slate-950/90 border-amber-900/40' : 'bg-slate-900 border-slate-800'}`}
+                                              >
+                                                <div className="flex items-center justify-between pb-1.5 border-b border-slate-800/70">
+                                                  <div className="flex items-center gap-2 flex-wrap">
+                                                    <span className="text-xs font-bold text-slate-100 font-mono">
+                                                      🏈 GAME: {m.matchSlateId}
+                                                    </span>
+                                                    <span className="text-[10px] text-slate-500 font-mono">
+                                                      ({m.effectiveRoomCode})
+                                                    </span>
+                                                    {isPastSlate ? (
+                                                      <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-950 text-amber-300 border border-amber-600/50 font-bold">
+                                                        OLD / PAST WEEK
+                                                      </span>
+                                                    ) : (
+                                                      <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-950 text-emerald-300 border border-emerald-600/50 font-bold">
+                                                        WEEK {activeWeekNum}
+                                                      </span>
+                                                    )}
+                                                  </div>
+                                                  <div className="flex items-center gap-1.5">
+                                                    <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 font-medium">
+                                                      {m.squads.length} {m.squads.length === 1 ? 'Squad' : 'Squads'}
+                                                    </span>
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => handleDeleteSingleSlate(m.effectiveRoomCode, room.sport, m.matchSlateId)}
+                                                      className="text-[10px] px-2 py-0.5 rounded bg-red-950/40 hover:bg-red-900/60 text-red-400 border border-red-800/40 flex items-center gap-1 cursor-pointer"
+                                                      title="Delete this game slate"
+                                                    >
+                                                      <X size={11} />
+                                                      <span>Delete</span>
+                                                    </button>
+                                                  </div>
+                                                </div>
 
                                           <div className="space-y-2 pl-2 border-l-2 border-blue-500/40">
                                             {m.squads.map((sq) => {
@@ -1510,15 +1644,18 @@ export const CommissionerModal: React.FC<CommissionerModalProps> = ({
                                                       Remove
                                                     </button>
                                                   </div>
-                                                </div>
-                                              );
-                                            })}
+                                                  </div>
+                                                );
+                                              })}
+                                            </div>
                                           </div>
-                                        </div>
-                                      ))}
+                                        );
+                                      })}
                                     </div>
                                   )}
                                 </div>
+                              );
+                            })()}
 
                                 {/* Inline Add Squad Form */}
                                 <div className="pt-2 border-t border-slate-800/60 flex items-center gap-2 flex-wrap">
@@ -1633,7 +1770,7 @@ export const CommissionerModal: React.FC<CommissionerModalProps> = ({
                     </div>
 
                     <div className="divide-y divide-slate-800/50 max-h-96 overflow-y-auto">
-                      {DEFAULT_NFL_MATCHES.map((m, idx) => {
+                      {currentWeekMatches.map((m, idx) => {
                         const awayCode = m.awayTeamCode || m.away_team || '';
                         const homeCode = m.homeTeamCode || m.home_team || '';
                         const awayRoster = NFL_ROSTER_MANIFEST[awayCode] || [];
@@ -1723,6 +1860,132 @@ export const CommissionerModal: React.FC<CommissionerModalProps> = ({
                       <span>{syncResult}</span>
                     </div>
                   )}
+
+                  {/* 0. NFL ACTIVE WEEK & SCHEDULE DIRECTOR */}
+                  <div className="p-4 sm:p-5 bg-gradient-to-r from-blue-950/80 via-slate-900 to-indigo-950/80 border-2 border-blue-500/50 rounded-xl space-y-4 shadow-lg">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-10 h-10 rounded-xl bg-blue-500/20 border border-blue-400/30 flex items-center justify-center text-blue-400 shrink-0 text-xl font-bold">
+                          🏈
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h4 className="text-base font-bold text-white">NFL Active Week Director</h4>
+                            <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold font-mono">
+                              ACTIVE: WEEK {activeWeekNum}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-300 mt-0.5">
+                            Controls the active weekly slate, roster lock resets, and ESPN live scoreboard for every player and room.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 w-full sm:w-auto">
+                        <button
+                          type="button"
+                          onClick={() => handleManualSetWeek(selectedManualWeek)}
+                          disabled={switchingWeek}
+                          className="w-full sm:w-auto px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors shadow-md shrink-0"
+                        >
+                          <RefreshCw size={13} className={switchingWeek ? 'animate-spin' : ''} />
+                          <span>{switchingWeek ? 'Advancing Week...' : `⚡ Move to Week ${selectedManualWeek} & Resync`}</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Manual Week Quick Selector */}
+                    <div className="p-3 bg-slate-950/70 rounded-lg border border-slate-800 space-y-2">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-slate-300 font-semibold flex items-center gap-1.5">
+                          <Calendar size={13} className="text-blue-400" />
+                          <span>Select Target NFL Week (1 - 18):</span>
+                        </span>
+                        <span className="text-slate-400 font-mono text-[11px]">
+                          {selectedManualWeek === activeWeekNum ? 'Current Active Week' : `Target Week: Week ${selectedManualWeek}`}
+                        </span>
+                      </div>
+
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {Array.from({ length: 18 }, (_, i) => i + 1).map((wk) => {
+                          const isCurrent = wk === activeWeekNum;
+                          const isSelected = wk === selectedManualWeek;
+                          return (
+                            <button
+                              key={wk}
+                              type="button"
+                              onClick={() => setSelectedManualWeek(wk)}
+                              className={`px-2.5 py-1.5 rounded text-xs font-bold font-mono transition-all cursor-pointer ${
+                                isSelected
+                                  ? 'bg-blue-600 text-white ring-2 ring-blue-400 shadow-md scale-105'
+                                  : isCurrent
+                                  ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-900/60'
+                                  : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800 hover:bg-slate-800'
+                              }`}
+                            >
+                              W{wk} {isCurrent && '★'}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* 16 Matchups for the Active Week Preview */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-xs pt-1">
+                        <span className="text-slate-200 font-semibold flex items-center gap-1.5">
+                          <span>🏈 Week {activeWeekNum} Schedule ({currentWeekMatches.length} Matchups from ESPN):</span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleRunSync('nfl')}
+                          disabled={syncingNFL}
+                          className="text-[11px] text-blue-400 hover:text-blue-300 font-medium flex items-center gap-1 cursor-pointer"
+                        >
+                          <RefreshCw size={11} className={syncingNFL ? 'animate-spin' : ''} />
+                          <span>{syncingNFL ? 'Updating ESPN...' : 'Refresh ESPN Scores'}</span>
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 max-h-56 overflow-y-auto pr-1">
+                        {currentWeekMatches.map((m, idx) => {
+                          const away = (m.awayTeamCode || m.away_team || '').toUpperCase();
+                          const home = (m.homeTeamCode || m.home_team || '').toUpperCase();
+                          const isTnf = idx === 0 || (away === 'PIT' && home === 'CLE');
+                          const isMnf = idx === currentWeekMatches.length - 1;
+                          return (
+                            <div
+                              key={m.id || `${away}_${home}`}
+                              className="p-2 rounded bg-slate-950/70 border border-slate-800 text-[11px] space-y-1"
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="font-mono font-bold text-slate-200">
+                                  #{idx + 1} {away} @ {home}
+                                </span>
+                                <span className={`text-[9px] px-1.5 py-0.2 rounded font-bold uppercase ${
+                                  m.status === 'final'
+                                    ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/50'
+                                    : m.status === 'live'
+                                    ? 'bg-red-950 text-red-400 border border-red-800/50 animate-pulse'
+                                    : 'bg-slate-800 text-slate-400'
+                                }`}>
+                                  {m.status === 'final' ? 'FINAL' : m.status === 'live' ? 'LIVE' : isTnf ? 'TNF' : isMnf ? 'MNF' : 'UPCOMING'}
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between text-slate-400 text-[10px]">
+                                <span>{m.quarter_time || m.periodLabel || 'Sun 1:00 PM'}</span>
+                                {(m.homeScore !== undefined && m.homeScore > 0) || (m.awayScore !== undefined && m.awayScore > 0) ? (
+                                  <span className="font-mono font-bold text-slate-200">
+                                    {m.awayScore} - {m.homeScore}
+                                  </span>
+                                ) : null}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
 
                   {/* Tuesday 4:00 AM EST Weekly Rescan Engine */}
                   <div className="p-4 bg-gradient-to-r from-amber-950/40 via-slate-900 to-indigo-950/40 border-2 border-amber-500/40 rounded-xl space-y-3">

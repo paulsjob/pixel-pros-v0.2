@@ -3,11 +3,12 @@ import { Competitor, Match, SportId, UserProfile, UserRoster } from '../types';
 import { PixelPlayerSprite } from './PixelPlayerSprite';
 import { PixelShieldIcon } from './PixelBadges';
 import { PixelHelmet } from './PixelHelmet';
-import { Users, Sparkles, ChevronLeft, ChevronRight, Trophy, ChevronDown, ChevronUp, Flame, CheckCircle2, ArrowRight } from 'lucide-react';
+import { Users, Sparkles, ChevronLeft, ChevronRight, Trophy, ChevronDown, ChevronUp, Flame, CheckCircle2, ArrowRight, Crown } from 'lucide-react';
 import { splitPlayerFirstLastName, formatPlayerInitialLastName, formatTeamPosSubtitle } from '../utils/formatters';
 import { getDeviceId } from '../lib/deviceIdentity';
 import { isGhostUser, getSquadLockState, fetchRoomRosters } from '../lib/supabaseClient';
 import { CentralLeagueLeaderboard } from './CentralLeagueLeaderboard';
+import { SeasonLeaderboard } from './SeasonLeaderboard';
 import {
   getPlayerScoringDisplay,
   resolvePlayerInPool,
@@ -71,13 +72,19 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
   onSwitchToPicks,
   isGameRoomMode = false,
 }) => {
-  // Top-level View Mode: 'central' (default), 'game_slates', 'top_players'
-  const [viewMode, setViewMode] = useState<'central' | 'game_slates' | 'top_players'>('central');
+  // Top-level View Mode: 'weekly' (default), 'season', 'game_slates', 'top_players'
+  const [viewMode, setViewMode] = useState<'weekly' | 'season' | 'game_slates' | 'top_players'>('weekly');
   // Two bold retro toggle buttons: [ FAMILY ] (default) and [ TOP SCORES ]
   const [activeTier, setActiveTier] = useState<'family' | 'top_scores'>('family');
   const [leagueSlateFilter, setLeagueSlateFilter] = useState<string>(() => {
     if (activeSlateId && activeSlateId.trim()) return activeSlateId.trim();
-    return isGameRoomMode ? 'ATL@GB' : 'MEGA_TOTAL';
+    if (matches && matches.length > 0) {
+      const first = matches[0];
+      const away = (first.awayTeamCode || first.away_team || '').toUpperCase();
+      const home = (first.homeTeamCode || first.home_team || '').toUpperCase();
+      if (away && home) return `${away}@${home}`;
+    }
+    return isGameRoomMode ? 'PIT@CLE' : 'MEGA_TOTAL';
   });
   const [showGameSelectorModal, setShowGameSelectorModal] = useState<boolean>(false);
 
@@ -551,19 +558,32 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
 
   return (
     <div className="leaderboard-column-wrapper w-full max-w-4xl mx-auto px-1 sm:px-3 box-border flex flex-col items-stretch space-y-2.5 sm:space-y-3">
-      {/* 1. Master 3-Way Navigation Bar: [ 🏆 ALL GAMES CENTRAL ] [ 🏈 MATCHUP SLATES ] [ ⭐ TOP PLAYERS ] */}
-      <div className="w-full flex items-center justify-center gap-1.5 sm:gap-2 box-border p-1 bg-[#0b1a2e] border-2 border-[#1e3a5f] rounded-xs shadow-md">
+      {/* 1. Master 4-Way Navigation Bar: [ 🏆 THIS WEEK ] [ 👑 SEASON ] [ 🏈 MATCHUPS ] [ ⭐ TOP STARS ] */}
+      <div className="w-full grid grid-cols-4 gap-1 sm:gap-1.5 box-border p-1 bg-[#0b1a2e] border-2 border-[#1e3a5f] rounded-xs shadow-md">
         <button
           type="button"
-          onClick={() => setViewMode('central')}
-          className={`touch-manipulation flex-1 py-1.5 sm:py-2 px-2 sm:px-3 font-pixel text-[10px] sm:text-xs rounded-xs border-2 cursor-pointer transition-all flex items-center justify-center gap-1.5 font-bold ${
-            viewMode === 'central'
+          onClick={() => setViewMode('weekly')}
+          className={`touch-manipulation py-1.5 sm:py-2 px-1 sm:px-2 font-pixel text-[9px] sm:text-xs rounded-xs border-2 cursor-pointer transition-all flex items-center justify-center gap-1 sm:gap-1.5 font-bold ${
+            viewMode === 'weekly'
               ? 'bg-[#ca8a04] text-[#451a03] border-[#fef08a] shadow-[0_2px_0_0_#713f12]'
               : 'bg-[#1e293b] text-[#cbd5e1] border-[#334155] hover:text-white'
           }`}
         >
-          <Trophy size={14} className={viewMode === 'central' ? 'text-[#451a03]' : 'text-[#facc15]'} />
-          <span className="truncate">ALL GAMES</span>
+          <Trophy size={13} className={viewMode === 'weekly' ? 'text-[#451a03]' : 'text-[#facc15]'} />
+          <span className="truncate">THIS WEEK</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setViewMode('season')}
+          className={`touch-manipulation py-1.5 sm:py-2 px-1 sm:px-2 font-pixel text-[9px] sm:text-xs rounded-xs border-2 cursor-pointer transition-all flex items-center justify-center gap-1 sm:gap-1.5 font-bold ${
+            viewMode === 'season'
+              ? 'bg-[#ca8a04] text-[#451a03] border-[#fef08a] shadow-[0_2px_0_0_#713f12]'
+              : 'bg-[#1e293b] text-[#cbd5e1] border-[#334155] hover:text-white'
+          }`}
+        >
+          <Crown size={13} className={viewMode === 'season' ? 'text-[#451a03]' : 'text-[#facc15]'} />
+          <span className="truncate">SEASON</span>
         </button>
 
         <button
@@ -572,13 +592,13 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
             setViewMode('game_slates');
             setActiveTier('family');
           }}
-          className={`touch-manipulation flex-1 py-1.5 sm:py-2 px-2 sm:px-3 font-pixel text-[10px] sm:text-xs rounded-xs border-2 cursor-pointer transition-all flex items-center justify-center gap-1.5 font-bold ${
+          className={`touch-manipulation py-1.5 sm:py-2 px-1 sm:px-2 font-pixel text-[9px] sm:text-xs rounded-xs border-2 cursor-pointer transition-all flex items-center justify-center gap-1 sm:gap-1.5 font-bold ${
             viewMode === 'game_slates'
               ? 'bg-[#12579b] text-[#fae5b8] border-[#38bdf8] shadow-[0_2px_0_0_#051a30]'
               : 'bg-[#1e293b] text-[#cbd5e1] border-[#334155] hover:text-white'
           }`}
         >
-          <Users size={14} className={viewMode === 'game_slates' ? 'text-[#38bdf8]' : 'text-[#94a3b8]'} />
+          <Users size={13} className={viewMode === 'game_slates' ? 'text-[#38bdf8]' : 'text-[#94a3b8]'} />
           <span className="truncate">MATCHUPS</span>
         </button>
 
@@ -588,19 +608,19 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
             setViewMode('top_players');
             setActiveTier('top_scores');
           }}
-          className={`touch-manipulation flex-1 py-1.5 sm:py-2 px-2 sm:px-3 font-pixel text-[10px] sm:text-xs rounded-xs border-2 cursor-pointer transition-all flex items-center justify-center gap-1.5 font-bold ${
+          className={`touch-manipulation py-1.5 sm:py-2 px-1 sm:px-2 font-pixel text-[9px] sm:text-xs rounded-xs border-2 cursor-pointer transition-all flex items-center justify-center gap-1 sm:gap-1.5 font-bold ${
             viewMode === 'top_players'
               ? 'bg-[#12579b] text-[#fae5b8] border-[#38bdf8] shadow-[0_2px_0_0_#051a30]'
               : 'bg-[#1e293b] text-[#cbd5e1] border-[#334155] hover:text-white'
           }`}
         >
-          <Sparkles size={14} className={viewMode === 'top_players' ? 'text-[#facc15]' : 'text-[#94a3b8]'} />
+          <Sparkles size={13} className={viewMode === 'top_players' ? 'text-[#facc15]' : 'text-[#94a3b8]'} />
           <span className="truncate">TOP STARS</span>
         </button>
       </div>
 
-      {/* VIEW MODE A: CENTRALIZED MULTI-GAME LEADERBOARD */}
-      {viewMode === 'central' && (
+      {/* VIEW MODE A: THIS WEEK'S MULTI-GAME PODIUM LEADERBOARD */}
+      {viewMode === 'weekly' && (
         <CentralLeagueLeaderboard
           roomCode={roomCode}
           userName={userName}
@@ -616,8 +636,23 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
         />
       )}
 
-      {/* VIEW MODES B & C: SINGLE GAME SLATES OR STAR PLAYERS */}
-      {viewMode !== 'central' && (
+      {/* VIEW MODE B: SEASON RUNNING LEADERBOARD */}
+      {viewMode === 'season' && (
+        <SeasonLeaderboard
+          roomCode={roomCode}
+          userName={userName}
+          sport={sport}
+          matches={matches}
+          roomRosters={effectiveRoomRosters}
+          competitors={safeNflPlayers}
+          onSelectWeek={() => {
+            setViewMode('weekly');
+          }}
+        />
+      )}
+
+      {/* VIEW MODES C & D: SINGLE GAME SLATES OR STAR PLAYERS */}
+      {viewMode !== 'weekly' && viewMode !== 'season' && (
         <>
       {/* 1. Single Clean Game Selector Bar (Flush width) */}
       <div className="w-full p-1 sm:p-1.5 bg-[#ecd7ab]/90 border-2 border-[#c99a57] rounded-xs shadow-inner box-border">

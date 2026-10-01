@@ -187,15 +187,15 @@ export default function App() {
       const home = (first.homeTeamCode || first.home_team || '').toUpperCase();
       if (away && home) return `${away}@${home}`;
     }
-    return currentSport === 'nba' ? 'BOS@NYK' : 'ATL@GB';
+    return currentSport === 'nba' ? 'BOS@NYK' : 'PIT@CLE';
   }, [matches, currentSport]);
 
   // Overarching App Mode:
-  // 'game' = INDIVIDUAL GAME BATTLE (e.g. Thursday Night Football ATL@GB)
+  // 'game' = INDIVIDUAL GAME BATTLE (e.g. Thursday Night Football PIT@CLE)
   // 'total_week' = TOTAL WEEK (Weekly Superstars & Mega Battle Leaderboard)
   const [appMode, setAppMode] = useState<'game' | 'total_week'>('game');
   const [activeSlateId, setActiveSlateId] = useState<string>(() => {
-    return 'ATL@GB';
+    return 'PIT@CLE';
   });
   const activeSlateIdRef = useRef<string>(activeSlateId);
   const [showArchivedInSwitcher, setShowArchivedInSwitcher] = useState<boolean>(false);
@@ -203,6 +203,20 @@ export default function App() {
   useEffect(() => {
     activeSlateIdRef.current = activeSlateId;
   }, [activeSlateId]);
+
+  // Auto-sync activeSlateId if current selection is from a stale week (not in active matches)
+  useEffect(() => {
+    if (matches && matches.length > 0 && activeSlateId !== 'SUPERSTARS' && activeSlateId !== 'MEGA_TOTAL') {
+      const matchExists = matches.some((m) => {
+        const away = (m.awayTeamCode || m.away_team || '').toUpperCase();
+        const home = (m.homeTeamCode || m.home_team || '').toUpperCase();
+        return `${away}@${home}` === activeSlateId || `${home}@${away}` === activeSlateId;
+      });
+      if (!matchExists) {
+        setActiveSlateId(defaultMatchSlate);
+      }
+    }
+  }, [matches, activeSlateId, defaultMatchSlate]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -1134,14 +1148,26 @@ export default function App() {
     let sse: EventSource | null = null;
     try {
       sse = new EventSource('/api/events');
-      sse.addEventListener('tuesday_rescan_completed', (e: any) => {
+      const processRescanPayload = (rawData: string) => {
         try {
-          const data = JSON.parse(e.data);
-          setIsLocked(false);
-          setRefreshTick((t) => t + 1);
-          showToast(`⚡ Tuesday 4:00 AM Rescan: Week ${data.activeWeek} is active! Picks unlocked.`);
+          const data = JSON.parse(rawData);
+          if (data.type === 'weekly_rescan_completed' || data.activeWeek || data.week) {
+            const wk = data.activeWeek || data.week;
+            setIsLocked(false);
+            setRefreshTick((t) => t + 1);
+            syncESPNData(currentSport).catch(() => {});
+            showToast(`⚡ Tuesday 4:00 AM Rescan: Week ${wk} is active! Picks unlocked.`);
+          }
         } catch {}
+      };
+
+      sse.addEventListener('tuesday_rescan_completed', (e: any) => {
+        processRescanPayload(e.data);
       });
+
+      sse.onmessage = (e: any) => {
+        processRescanPayload(e.data);
+      };
     } catch {}
 
     return () => {
@@ -2145,6 +2171,7 @@ export default function App() {
           currentRoom={roomCode}
           currentSport={currentSport}
           roomRosters={roomRosters}
+          matches={matches}
           onSwitchRoom={(newRoom, newSport) => {
             handleCommitRoomCode(newRoom, newSport);
           }}
