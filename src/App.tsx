@@ -24,6 +24,7 @@ import {
   resolveSupabaseAnonKey,
   setCustomSupabaseKey,
   checkSupabaseConfigured,
+  clearClientAllWeekPicks,
 } from './lib/supabaseClient';
 import { MyTeamView } from './components/MyTeamView';
 
@@ -1121,28 +1122,72 @@ export default function App() {
     };
   }, [currentSport]);
 
-  // Tuesday 4:00 AM EST Automated Rescan Handler
+  // Tuesday 4:00 AM EST Automated Rescan Handler & Week Rollover Pick Clearance
   useEffect(() => {
+    // 0. Auto-clear picks if saved picks week lags behind active calendar NFL week
+    const activeWeekNum = getCurrentNFLWeek();
+    const lastPicksWeek = localStorage.getItem('pixel_pros_picks_active_week');
+    if (lastPicksWeek && lastPicksWeek !== String(activeWeekNum)) {
+      clearClientAllWeekPicks('nfl').catch(() => {});
+      setSquadSlots({ star1: null, star2: null, star3: null });
+      setIsLocked(false);
+    }
+    localStorage.setItem('pixel_pros_picks_active_week', String(activeWeekNum));
+
     // 1. Check if rescan is due on initial app mount
     const lastRescan = localStorage.getItem('pixel_pros_last_tuesday_rescan');
     if (isWeeklyRescanDue(lastRescan)) {
       executeCompleteWeeklyRescan().then((res) => {
         if (res.success) {
+          setSquadSlots({ star1: null, star2: null, star3: null });
           setIsLocked(false);
           setRefreshTick((t) => t + 1);
-          showToast(`⚡ Tuesday 4:00 AM Rescan: Week ${res.activeWeek} is open for picks!`);
+          showToast(`⚡ Tuesday 4:00 AM Rescan: Week ${res.activeWeek} is open for picks! All previous week picks cleared.`);
         }
       });
     }
 
-    // 2. Custom event listener from client-side triggered rescan
+    // 2. Custom event listener from client-side triggered rescan / picks cleared
     const handleRescanEvent = (e: any) => {
+      setSquadSlots({ star1: null, star2: null, star3: null });
       setIsLocked(false);
+      setRoomRosters((prev) =>
+        prev
+          .filter((r) => (r.sport || 'nfl') !== 'nfl' || !r.room_code.includes('__'))
+          .map((r) =>
+            (r.sport || 'nfl') === 'nfl'
+              ? { ...r, star_1_id: '', star_2_id: '', star_3_id: '', is_locked: false, device_id: 'UNLOCKED' }
+              : r
+          )
+      );
+      fetchRoomRosters(roomCode, currentSport).then((fresh) => {
+        if (fresh) setRoomRosters(fresh);
+      });
       setRefreshTick((t) => t + 1);
       const wk = e.detail?.week || getCurrentNFLWeek();
-      showToast(`⚡ Tuesday 4:00 AM Rescan: Week ${wk} active! Locks reset.`);
+      showToast(`⚡ Tuesday 4:00 AM Rescan: Week ${wk} active! All picks cleared for new games & Weekly Superstars.`);
     };
+
+    const handlePicksCleared = () => {
+      setSquadSlots({ star1: null, star2: null, star3: null });
+      setIsLocked(false);
+      setRoomRosters((prev) =>
+        prev
+          .filter((r) => (r.sport || 'nfl') !== 'nfl' || !r.room_code.includes('__'))
+          .map((r) =>
+            (r.sport || 'nfl') === 'nfl'
+              ? { ...r, star_1_id: '', star_2_id: '', star_3_id: '', is_locked: false, device_id: 'UNLOCKED' }
+              : r
+          )
+      );
+      fetchRoomRosters(roomCode, currentSport).then((fresh) => {
+        if (fresh) setRoomRosters(fresh);
+      });
+      setRefreshTick((t) => t + 1);
+    };
+
     window.addEventListener('pixel_pros_weekly_rescan_completed', handleRescanEvent);
+    window.addEventListener('pixel_pros_week_picks_cleared', handlePicksCleared);
 
     // 3. SSE event listener from server-side Tuesday 4:00 AM automated scheduler
     let sse: EventSource | null = null;
@@ -1151,17 +1196,33 @@ export default function App() {
       const processRescanPayload = (rawData: string) => {
         try {
           const data = JSON.parse(rawData);
-          if (data.type === 'weekly_rescan_completed' || data.activeWeek || data.week) {
-            const wk = data.activeWeek || data.week;
+          if (data.type === 'weekly_rescan_completed' || data.type === 'week_picks_cleared' || data.activeWeek || data.week) {
+            const wk = data.activeWeek || data.week || getCurrentNFLWeek();
+            setSquadSlots({ star1: null, star2: null, star3: null });
             setIsLocked(false);
+            setRoomRosters((prev) =>
+              prev
+                .filter((r) => (r.sport || 'nfl') !== 'nfl' || !r.room_code.includes('__'))
+                .map((r) =>
+                  (r.sport || 'nfl') === 'nfl'
+                    ? { ...r, star_1_id: '', star_2_id: '', star_3_id: '', is_locked: false, device_id: 'UNLOCKED' }
+                    : r
+                )
+            );
+            fetchRoomRosters(roomCode, currentSport).then((fresh) => {
+              if (fresh) setRoomRosters(fresh);
+            });
             setRefreshTick((t) => t + 1);
             syncESPNData(currentSport).catch(() => {});
-            showToast(`⚡ Tuesday 4:00 AM Rescan: Week ${wk} is active! Picks unlocked.`);
+            showToast(`⚡ NFL Week ${wk} active! All previous week picks cleared for new games & Weekly Superstars.`);
           }
         } catch {}
       };
 
       sse.addEventListener('tuesday_rescan_completed', (e: any) => {
+        processRescanPayload(e.data);
+      });
+      sse.addEventListener('week_picks_cleared', (e: any) => {
         processRescanPayload(e.data);
       });
 
@@ -1172,6 +1233,7 @@ export default function App() {
 
     return () => {
       window.removeEventListener('pixel_pros_weekly_rescan_completed', handleRescanEvent);
+      window.removeEventListener('pixel_pros_week_picks_cleared', handlePicksCleared);
       if (sse) sse.close();
     };
   }, []);

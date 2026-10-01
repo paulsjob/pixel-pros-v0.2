@@ -50,6 +50,7 @@ import {
   autoArchiveCompletedRooms,
   deleteRoomPermanently,
   purgeAllArchivedRooms,
+  clearClientAllWeekPicks,
 } from '../lib/supabaseClient';
 import { syncESPNData, getLastESPNSyncTime, getCurrentNFLWeek, setManualNFLWeek } from '../lib/espnSync';
 import { runPureDynamicDepthChartSync } from '../lib/espnDepthChartSync';
@@ -149,6 +150,7 @@ export const CommissionerModal: React.FC<CommissionerModalProps> = ({
   const [squadToDelete, setSquadToDelete] = useState<{ room: string; sport: SportId; squad: string } | null>(null);
   const [roomToDelete, setRoomToDelete] = useState<{ room: string; sport: SportId } | null>(null);
   const [squadToClear, setSquadToClear] = useState<{ room: string; sport: SportId; squad: string } | null>(null);
+  const [showClearAllPicksModal, setShowClearAllPicksModal] = useState(false);
 
   // Load all rooms when opened or when rosters change
   const refreshMasterRooms = async () => {
@@ -483,26 +485,42 @@ export const CommissionerModal: React.FC<CommissionerModalProps> = ({
 
   const handleManualSetWeek = async (targetWeek: number) => {
     setSwitchingWeek(true);
-    showToast(`Advancing to NFL Week ${targetWeek} & syncing live ESPN schedule...`);
+    showToast(`Advancing to NFL Week ${targetWeek} & clearing previous week picks...`);
     try {
-      // 1. Tell server to switch week and clear squad locks
+      // 1. Tell server to switch week and clear squad locks & old week picks
       await fetch('/api/espn/set-week', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ week: targetWeek }),
       });
-      // 2. Set client local week & clear old week match cache
+      // 2. Set client local week, clear old week match cache, and wipe all local picks
       setManualNFLWeek(targetWeek);
+      await clearClientAllWeekPicks('nfl');
       // 3. Immediately pull live ESPN schedule & stats for that target week
       await syncESPNData('nfl');
       // 4. Trigger UI refresh and rooms refresh
       onRefreshData();
       await refreshMasterRooms();
-      showToast(`⚡ Successfully moved to NFL Week ${targetWeek}! 16 matchups loaded.`);
+      showToast(`⚡ Successfully moved to NFL Week ${targetWeek}! All previous week picks cleared.`);
     } catch (err: any) {
       showToast(`Failed to switch week: ${err.message}`);
     } finally {
       setSwitchingWeek(false);
+    }
+  };
+
+  const handleClearAllWeekPicks = async () => {
+    try {
+      setSwitchingWeek(true);
+      await clearClientAllWeekPicks('nfl');
+      onRefreshData();
+      await refreshMasterRooms();
+      showToast(`🧹 All picks cleared for Week ${activeWeekNum}! New games and Weekly Superstars are reset.`);
+    } catch (err: any) {
+      showToast(`Failed to clear week picks: ${err.message}`);
+    } finally {
+      setSwitchingWeek(false);
+      setShowClearAllPicksModal(false);
     }
   };
 
@@ -1881,7 +1899,7 @@ export const CommissionerModal: React.FC<CommissionerModalProps> = ({
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 w-full sm:w-auto">
+                      <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
                         <button
                           type="button"
                           onClick={() => handleManualSetWeek(selectedManualWeek)}
@@ -1890,6 +1908,15 @@ export const CommissionerModal: React.FC<CommissionerModalProps> = ({
                         >
                           <RefreshCw size={13} className={switchingWeek ? 'animate-spin' : ''} />
                           <span>{switchingWeek ? 'Advancing Week...' : `⚡ Move to Week ${selectedManualWeek} & Resync`}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowClearAllPicksModal(true)}
+                          disabled={switchingWeek}
+                          className="w-full sm:w-auto px-3.5 py-2 rounded-lg bg-amber-600/90 hover:bg-amber-500 disabled:opacity-50 text-white text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors shadow-md shrink-0"
+                        >
+                          <Trash2 size={13} />
+                          <span>🧹 Clear All Week Picks</span>
                         </button>
                       </div>
                     </div>
@@ -2371,6 +2398,47 @@ export const CommissionerModal: React.FC<CommissionerModalProps> = ({
                   className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-medium cursor-pointer shadow-sm"
                 >
                   Reset to 0 Points
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL: CONFIRM CLEAR ALL WEEK PICKS */}
+        {showClearAllPicksModal && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-60 p-4">
+            <div className="bg-slate-900 border-2 border-amber-500/50 rounded-xl p-5 max-w-md w-full space-y-4 shadow-2xl">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0">
+                  <Trash2 size={18} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-100 text-sm">Clear All Picks for Week {activeWeekNum}?</h3>
+                  <p className="text-xs text-slate-400">Week Turnover & Slate Reset</p>
+                </div>
+              </div>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                This will clear out all picks for the week across both new game slates and the Weekly Superstars game for the entire league.
+                <br /><br />
+                <strong className="text-amber-300">Preserved:</strong> All family squad names and room memberships remain completely intact so everyone can immediately draft their new stars!
+              </p>
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowClearAllPicksModal(false)}
+                  disabled={switchingWeek}
+                  className="px-3.5 py-1.5 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 text-xs font-medium cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleClearAllWeekPicks}
+                  disabled={switchingWeek}
+                  className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-md"
+                >
+                  {switchingWeek ? <RefreshCw size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                  <span>Confirm Clear All Picks</span>
                 </button>
               </div>
             </div>

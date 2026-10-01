@@ -1865,6 +1865,112 @@ export async function clearSquadStars(
   return true;
 }
 
+/**
+ * Clears out all picks for the week across both individual game slates and Weekly Superstars.
+ * Keeps user squad registrations intact in base rooms while purging old game slates and wiping star picks.
+ */
+export async function clearClientAllWeekPicks(sport: SportId = 'nfl'): Promise<boolean> {
+  // 1. Wipe client-side localStorage caches for picks and locks
+  if (typeof localStorage !== 'undefined') {
+    try {
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key) continue;
+
+        // Clear individual roster slots cache
+        if (
+          key.startsWith(`pixel_pros_roster_${sport}_`) ||
+          key.startsWith(`pixel_pros_squad_lock_${sport}_`) ||
+          key.startsWith('pixel_pros_picks_locked_') ||
+          key.startsWith('pixel_locked_')
+        ) {
+          keysToRemove.push(key);
+        } else if (key.startsWith('pixel_pros_rosters_')) {
+          if (sport === 'nfl' && !key.endsWith('_nba')) {
+            if (key.includes('__')) {
+              // Subroom / game slate -> purge entirely
+              keysToRemove.push(key);
+            } else {
+              // Base room -> keep squads, wipe star picks
+              try {
+                const raw = localStorage.getItem(key);
+                if (raw) {
+                  const arr: UserRoster[] = JSON.parse(raw);
+                  if (Array.isArray(arr)) {
+                    const cleaned = arr.map((r) => ({
+                      ...r,
+                      star_1_id: '',
+                      star_2_id: '',
+                      star_3_id: '',
+                      is_locked: false,
+                      device_id: 'UNLOCKED',
+                      updated_at: new Date().toISOString(),
+                    }));
+                    localStorage.setItem(key, JSON.stringify(cleaned));
+                  }
+                }
+              } catch {}
+            }
+          }
+        }
+      }
+
+      keysToRemove.forEach((k) => {
+        try {
+          localStorage.removeItem(k);
+        } catch {}
+      });
+    } catch (e) {
+      console.warn('Error clearing client week picks from localStorage:', e);
+    }
+  }
+
+  // 2. Call backend /api/rosters/clear-week-picks
+  try {
+    await apiFetch('/api/rosters/clear-week-picks', {
+      method: 'POST',
+      body: JSON.stringify({ sport }),
+    });
+  } catch (err) {
+    console.warn('Error calling /api/rosters/clear-week-picks:', err);
+  }
+
+  // 3. Fallback direct Supabase update if configured client-side
+  if (checkSupabaseConfigured() && sport === 'nfl') {
+    try {
+      const client = getSupabaseClient();
+      await client.from('user_rosters').delete().like('room_code', '%__%').eq('sport', 'nfl');
+      await client.from('user_rosters').update({
+        star_1_id: '',
+        star_2_id: '',
+        star_3_id: '',
+        is_locked: false,
+        device_id: 'UNLOCKED',
+        updated_at: new Date().toISOString(),
+      }).not('room_code', 'like', '%__%').eq('sport', 'nfl');
+    } catch (sbErr) {
+      console.warn('Supabase client week clear error:', sbErr);
+    }
+  }
+
+  // 4. Dispatch events to notify UI components
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('pixel_pros_week_picks_cleared', {
+        detail: { sport, timestamp: new Date().toISOString() },
+      })
+    );
+    window.dispatchEvent(
+      new CustomEvent('pixel_pros_roster_update', {
+        detail: { clearedAllWeekPicks: true, sport },
+      })
+    );
+  }
+
+  return true;
+}
+
 export function subscribeToRoomRosters(
   roomCode: string,
   sportOrCb: SportId | (() => void) = 'nfl',

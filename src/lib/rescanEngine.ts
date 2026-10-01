@@ -13,7 +13,7 @@
 import { SportId, Competitor, Match } from '../types';
 import { runPureDynamicDepthChartSync } from './espnDepthChartSync';
 import { getCurrentNFLWeek, setCurrentNFLWeek, syncESPNData } from './espnSync';
-import { isSupabaseConfigured, supabase } from './supabaseClient';
+import { isSupabaseConfigured, supabase, clearClientAllWeekPicks } from './supabaseClient';
 
 export interface InjuryReportItem {
   athleteId?: string;
@@ -284,13 +284,14 @@ export async function executeCompleteWeeklyRescan(
       }
     }
 
-    // 3. Clear old matches cache and fetch authoritative ESPN matches & scores for the active week
-    onProgress?.(`Syncing official NFL Week ${upcomingWeek} matchups from ESPN...`);
+    // 3. Clear old matches cache, purge stale game slates, and reset Weekly Superstars picks for the fresh week
+    onProgress?.(`Clearing past-week picks and syncing official NFL Week ${upcomingWeek} matchups...`);
     try {
       localStorage.removeItem('pixel_pros_synced_matches_nfl');
+      await clearClientAllWeekPicks('nfl');
       await syncESPNData('nfl');
     } catch (syncErr) {
-      console.warn('Could not sync ESPN matches during rescan:', syncErr);
+      console.warn('Could not sync ESPN matches/clear picks during rescan:', syncErr);
     }
 
     // 4. Fetch live injuries
