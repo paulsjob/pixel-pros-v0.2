@@ -9,6 +9,7 @@ import {
   getTeamFullName,
   getUniformNumber,
   sortMatchesByKickoffAndStatus,
+  getBaseSeasonRoom,
 } from '../utils/teamData';
 import { getStarterManifestDepth, isRetiredPlayer, ROSTER_CACHE_VERSION } from '../data/nflRosterManifest';
 import {
@@ -757,21 +758,28 @@ export async function upsertUserRoster(
 
   // 1. Immediate local cache for zero UI lag
   try {
-    const localKey = sport === 'nba' ? `pixel_pros_rosters_${cleanRoom}_nba` : `pixel_pros_rosters_${cleanRoom}`;
-    const raw = localStorage.getItem(localKey);
-    let rosters: UserRoster[] = raw ? JSON.parse(raw) : [];
-    const idx = rosters.findIndex((r) => r.user_name.toUpperCase() === cleanName);
-    if (idx >= 0) {
-      rosters[idx] = { ...rosters[idx], ...record };
-    } else {
-      rosters.push(record);
-    }
-    localStorage.setItem(localKey, JSON.stringify(rosters));
+    const baseRoom = cleanRoom.includes('__') ? cleanRoom.split('__')[0] : cleanRoom;
+    const roomKeys = [cleanRoom];
+    if (baseRoom !== cleanRoom) roomKeys.push(baseRoom);
 
-    const lockKey = sport === 'nba'
-      ? `pixel_pros_picks_locked_${cleanRoom}_${cleanName}_nba`
-      : `pixel_pros_picks_locked_${cleanRoom}_${cleanName}`;
-    localStorage.setItem(lockKey, guardedLocked ? 'true' : 'false');
+    roomKeys.forEach((rCode) => {
+      const localKey = sport === 'nba' ? `pixel_pros_rosters_${rCode}_nba` : `pixel_pros_rosters_${rCode}`;
+      const raw = localStorage.getItem(localKey);
+      let rosters: UserRoster[] = raw ? JSON.parse(raw) : [];
+      const idx = rosters.findIndex(
+        (r) =>
+          (r.room_code || '').trim().toUpperCase() === cleanRoom &&
+          (r.user_name || '').trim().toUpperCase() === cleanName
+      );
+      if (idx >= 0) {
+        rosters[idx] = { ...rosters[idx], ...record };
+      } else {
+        rosters.push(record);
+      }
+      localStorage.setItem(localKey, JSON.stringify(rosters));
+    });
+
+    setSquadLockState(cleanRoom, cleanName, guardedLocked, sport);
 
     const rosterKey = sport === 'nba'
       ? `pixel_pros_roster_${cleanRoom}_${cleanName}_nba`
@@ -908,7 +916,7 @@ export async function fetchAllActiveRooms(
     const sSport: SportId = (sport || 'nfl').toString().toLowerCase() === 'nba' ? 'nba' : 'nfl';
     if (!rawCode) return;
 
-    const rCode = rawCode.split('__')[0];
+    const rCode = getBaseSeasonRoom(rawCode);
     const mapKey = `${rCode}_${sSport}`;
     if (!roomMap.has(mapKey)) {
       roomMap.set(mapKey, { roomCode: rCode, sport: sSport, squads: new Set() });
@@ -1422,13 +1430,19 @@ export function getSquadLockState(roomCode: string, userName: string, sport: Spo
   const cleanRoom = (roomCode || 'COUCH').trim().toUpperCase();
   const cleanName = (userName || 'DAD').trim().toUpperCase();
   try {
-    if (sport === 'nba') {
-      return localStorage.getItem(`pixel_pros_picks_locked_${cleanRoom}_${cleanName}_nba`) === 'true';
-    }
-    return (
-      localStorage.getItem(`pixel_locked_${cleanRoom}_${cleanName}`) === 'true' ||
-      localStorage.getItem(`pixel_pros_picks_locked_${cleanRoom}_${cleanName}`) === 'true'
-    );
+    const primaryKey = `pixel_pros_picks_locked_${cleanRoom}_${cleanName}_${sport}`;
+    const primary = localStorage.getItem(primaryKey);
+    if (primary !== null) return primary === 'true';
+
+    const fallbackKey = `pixel_pros_picks_locked_${cleanRoom}_${cleanName}`;
+    const fallback = localStorage.getItem(fallbackKey);
+    if (fallback !== null) return fallback === 'true';
+
+    const legacyKey = `pixel_locked_${cleanRoom}_${cleanName}`;
+    const legacy = localStorage.getItem(legacyKey);
+    if (legacy !== null) return legacy === 'true';
+
+    return false;
   } catch {
     return false;
   }
@@ -1438,12 +1452,12 @@ export function setSquadLockState(roomCode: string, userName: string, locked: bo
   const cleanRoom = (roomCode || 'COUCH').trim().toUpperCase();
   const cleanName = (userName || 'DAD').trim().toUpperCase();
   try {
-    if (sport === 'nba') {
-      localStorage.setItem(`pixel_pros_picks_locked_${cleanRoom}_${cleanName}_nba`, String(locked));
-    } else {
-      localStorage.setItem(`pixel_locked_${cleanRoom}_${cleanName}`, String(locked));
-      localStorage.setItem(`pixel_pros_picks_locked_${cleanRoom}_${cleanName}`, String(locked));
-    }
+    const val = locked ? 'true' : 'false';
+    localStorage.setItem(`pixel_pros_picks_locked_${cleanRoom}_${cleanName}_${sport}`, val);
+    localStorage.setItem(`pixel_pros_picks_locked_${cleanRoom}_${cleanName}`, val);
+    localStorage.setItem(`pixel_locked_${cleanRoom}_${cleanName}`, val);
+    localStorage.setItem(`pixel_pros_picks_locked_${cleanRoom}_${cleanName}_nba`, val);
+    localStorage.setItem(`pixel_pros_picks_locked_${cleanRoom}_${cleanName}_nfl`, val);
   } catch {
     // ignore
   }
@@ -1467,11 +1481,10 @@ export async function fetchRoomRosters(roomCode: string, sport: SportId = 'nfl')
       );
       const distinctStars = new Set(starIds);
       const hasThreeDistinct = starIds.length === 3 && distinctStars.size === 3;
-      const isLocked = Boolean(
+      const isLocked = hasThreeDistinct && Boolean(
         r.is_locked === true ||
         r.is_locked === 'true' ||
-        String(r.device_id).toUpperCase() === 'LOCKED' ||
-        (hasThreeDistinct && getSquadLockState(rRoomCode, userName, sport))
+        String(r.device_id).toUpperCase() === 'LOCKED'
       );
 
       const existing = rosterMap.get(mapKey);
@@ -1497,7 +1510,7 @@ export async function fetchRoomRosters(roomCode: string, sport: SportId = 'nfl')
           star_1_id: r.star_1_id || existing?.star_1_id || '',
           star_2_id: r.star_2_id || existing?.star_2_id || '',
           star_3_id: r.star_3_id || existing?.star_3_id || '',
-          is_locked: isLocked || Boolean(existing?.is_locked),
+          is_locked: isLocked,
           updated_at: r.updated_at || new Date().toISOString(),
         });
       }
@@ -1710,6 +1723,34 @@ export async function toggleSquadLock(
   if (!cleanUser) return false;
 
   setSquadLockState(cleanRoom, cleanUser, isLocked, sport);
+
+  // Update cached roster arrays in local storage
+  const baseRoom = cleanRoom.includes('__') ? cleanRoom.split('__')[0] : cleanRoom;
+  const roomKeys = [cleanRoom];
+  if (baseRoom !== cleanRoom) roomKeys.push(baseRoom);
+
+  roomKeys.forEach((rCode) => {
+    const k = sport === 'nba' ? `pixel_pros_rosters_${rCode}_nba` : `pixel_pros_rosters_${rCode}`;
+    try {
+      const raw = localStorage.getItem(k);
+      if (raw) {
+        let rosters: UserRoster[] = JSON.parse(raw);
+        if (Array.isArray(rosters)) {
+          const idx = rosters.findIndex(
+            (r) =>
+              (r.room_code || '').trim().toUpperCase() === cleanRoom &&
+              (r.user_name || '').trim().toUpperCase() === cleanUser
+          );
+          if (idx >= 0) {
+            rosters[idx].is_locked = isLocked;
+            rosters[idx].device_id = isLocked ? 'LOCKED' : 'UNLOCKED';
+            rosters[idx].updated_at = new Date().toISOString();
+            localStorage.setItem(k, JSON.stringify(rosters));
+          }
+        }
+      }
+    } catch {}
+  });
 
   // Server API lock
   try {

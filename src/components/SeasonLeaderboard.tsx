@@ -3,11 +3,14 @@ import { Competitor, Match, SportId, UserRoster } from '../types';
 import { Trophy, Crown, Calendar, Sparkles, ChevronRight, CheckCircle2 } from 'lucide-react';
 import {
   parseLeagueIdentity,
-  resolvePlayerInPool,
+  resolveCompetitorById,
   findMatchForPlayer,
   getPlayerScoringDisplay,
   DEFAULT_NFL_MATCHES,
+  normalizeTeamCode,
 } from '../utils/teamData';
+import { getCurrentNFLWeek } from '../lib/espnSync';
+import { isGhostUser } from '../lib/supabaseClient';
 
 interface SeasonLeaderboardProps {
   roomCode: string;
@@ -96,41 +99,76 @@ export const SeasonLeaderboard: React.FC<SeasonLeaderboardProps> = ({
     return Array.from(map.values());
   }, [matches, sport]);
 
-  const getPlayerLivePoints = (p: Competitor | null | undefined): number => {
+  const getPlayerLivePoints = (p: Competitor | null | undefined, weekNumber?: number): number => {
     if (!p) return 0;
-    const match = findMatchForPlayer(p, allSeasonMatches);
+    let match: Match | undefined;
+    if (weekNumber) {
+      match = allSeasonMatches.find((m) => {
+        if (m.week !== weekNumber) return false;
+        const pTeam = normalizeTeamCode(p.teamCode || (p as any).team || '');
+        const away = normalizeTeamCode(m.awayTeamCode || m.away_team || '');
+        const home = normalizeTeamCode(m.homeTeamCode || m.home_team || '');
+        return away === pTeam || home === pTeam;
+      });
+    }
+    if (!match) {
+      match = findMatchForPlayer(p, allSeasonMatches);
+    }
+    if (!match) return 0;
+
+    // Upcoming games: strictly 0 fantasy points!
+    if (match.status === 'upcoming') {
+      return 0;
+    }
+
     const info = getPlayerScoringDisplay(p, match, sport);
     if (info.gameState === 'pre') return 0;
-    return info.activeScore > 0 ? info.activeScore : 0;
+    if (info.activeScore > 0) return info.activeScore;
+
+    // For completed or live games, use recorded scores:
+    if (match.status === 'final' || match.status === 'live') {
+      if (p.score && p.score > 0) return p.score;
+      if (p.lastGameScore && p.lastGameScore > 0) return p.lastGameScore;
+      if (info.historicalScore && info.historicalScore > 0) return info.historicalScore;
+    }
+    return 0;
   };
 
   // Group rosters by week
   const { distinctWeeks, seasonStatsList, seasonChampion } = useMemo(() => {
-    // 1. Identify all weeks with roster activity
+    const currentWeek = sport === 'nfl' ? getCurrentNFLWeek() : 1;
+    // 1. Identify all weeks on the schedule up to current week
     const weeksSet = new Set<number>();
-    // Always include Week 2 and Week 3 as base active weeks if present in matches
     allSeasonMatches.forEach((m) => {
-      if (m.week && typeof m.week === 'number') {
+      if (m.week && typeof m.week === 'number' && m.week <= currentWeek) {
         weeksSet.add(m.week);
       }
     });
 
-    // Also parse from roster room codes
+    // Also include weeks from saved roster records
     allLeagueRosters.forEach((r) => {
       const rId = parseLeagueIdentity(r.room_code || '');
-      if (rId.weekNumber) weeksSet.add(rId.weekNumber);
+      if (rId.weekNumber && rId.weekNumber <= currentWeek) {
+        weeksSet.add(rId.weekNumber);
+      }
     });
 
-    const distinctWeeks = Array.from(weeksSet).sort((a, b) => a - b);
-    if (distinctWeeks.length === 0) distinctWeeks.push(3); // default fallback
+    if (currentWeek) {
+      weeksSet.add(currentWeek);
+    }
 
-    // 2. Identify all unique squads participating in this league
+    const distinctWeeks = Array.from(weeksSet).sort((a, b) => a - b);
+    if (distinctWeeks.length === 0) distinctWeeks.push(currentWeek || 4);
+
+    // 2. Identify all unique legitimate squads participating in this league
     const squadNames = new Set<string>();
     allLeagueRosters.forEach((r) => {
       const u = (r.user_name || '').trim().toUpperCase();
-      if (u) squadNames.add(u);
+      if (u && !isGhostUser(u)) squadNames.add(u);
     });
-    if (activeNormalizedName) squadNames.add(activeNormalizedName);
+    if (activeNormalizedName && !isGhostUser(activeNormalizedName)) {
+      squadNames.add(activeNormalizedName);
+    }
 
     // Initial stats structure for each squad
     const statsMap: Record<string, SquadSeasonStats> = {};
@@ -176,13 +214,17 @@ export const SeasonLeaderboard: React.FC<SeasonLeaderboardProps> = ({
       weekMatches.forEach((m) => {
         const awayCode = (m.awayTeamCode || m.away_team || '').trim().toUpperCase();
         const homeCode = (m.homeTeamCode || m.home_team || '').trim().toUpperCase();
-        const slateTargetA = `${baseLeague}_WK${w}__${awayCode}_${homeCode}`;
-        const slateTargetB = `${baseLeague}__${awayCode}_${homeCode}`;
 
-        // Find rosters entered in this game slate
+        // Find rosters entered in this game slate (supporting season-long rooms and legacy week rooms)
         const slateRosters = allLeagueRosters.filter((r) => {
           const rCode = (r.room_code || '').trim().toUpperCase();
-          return rCode === slateTargetA || (w === 3 && rCode === slateTargetB);
+          if (!rCode.endsWith(`__${awayCode}_${homeCode}`)) return false;
+          const id = parseLeagueIdentity(rCode);
+          if (id.baseLeague !== baseLeague) return false;
+          if (id.weekNumber !== null && id.weekNumber !== undefined) {
+            return id.weekNumber === w;
+          }
+          return m.week === w;
         });
 
         const gameScores: Array<{ userName: string; score: number }> = [];
@@ -190,20 +232,23 @@ export const SeasonLeaderboard: React.FC<SeasonLeaderboardProps> = ({
         slateRosters.forEach((r) => {
           const u = (r.user_name || '').trim().toUpperCase();
           if (!u || !statsMap[u]) return;
-          const s1 = resolvePlayerInPool(r.star_1_id, competitors, sport);
-          const s2 = resolvePlayerInPool(r.star_2_id, competitors, sport);
-          const s3 = resolvePlayerInPool(r.star_3_id, competitors, sport);
+          const s1 = resolveCompetitorById(r.star_1_id, competitors, null, sport);
+          const s2 = resolveCompetitorById(r.star_2_id, competitors, null, sport);
+          const s3 = resolveCompetitorById(r.star_3_id, competitors, null, sport);
           const valid = [s1, s2, s3].filter(Boolean) as Competitor[];
           if (valid.length > 0) {
-            const score = valid.reduce((sum, p) => sum + getPlayerLivePoints(p), 0);
+            const score = valid.reduce((sum, p) => sum + getPlayerLivePoints(p, w), 0);
             gameScores.push({ userName: u, score });
             weeklySquadGamePoints[u] = (weeklySquadGamePoints[u] || 0) + score;
-            statsMap[u].totalGamesPlayed += 1;
+            if (m.status === 'final' || m.status === 'live') {
+              statsMap[u].totalGamesPlayed += 1;
+            }
           }
         });
 
-        // Determine winner of this game
-        if (gameScores.length > 0) {
+        // Determine winner of this game: only for completed or active games!
+        const isGamePlayedOrLive = m.status === 'final' || m.status === 'live';
+        if (isGamePlayedOrLive && gameScores.length > 0) {
           gameScores.sort((a, b) => b.score - a.score);
           const topScore = gameScores[0].score;
           if (topScore > 0 || m.status === 'final') {
@@ -216,7 +261,7 @@ export const SeasonLeaderboard: React.FC<SeasonLeaderboardProps> = ({
                 statsMap[wName].weekBreakdown[w].wins += 1;
                 statsMap[wName].weekBreakdown[w].outrightWins += 1;
               }
-            } else {
+            } else if (winners.length > 1 && topScore > 0) {
               winners.forEach((win) => {
                 if (statsMap[win.userName]) {
                   statsMap[win.userName].totalSeasonWins += 1;
@@ -228,6 +273,64 @@ export const SeasonLeaderboard: React.FC<SeasonLeaderboardProps> = ({
           }
         }
       });
+
+      // Process Weekly Superstars Contest for Week w
+      const superstarRosters = allLeagueRosters.filter((r) => {
+        const rCode = (r.room_code || '').trim().toUpperCase();
+        if (rCode.includes('__')) return false;
+        const id = parseLeagueIdentity(rCode);
+        if (id.baseLeague !== baseLeague) return false;
+        if (id.weekNumber !== null && id.weekNumber !== undefined) {
+          return id.weekNumber === w;
+        }
+        return w === currentWeek;
+      });
+
+      if (superstarRosters.length > 0) {
+        const superstarScores: Array<{ userName: string; score: number }> = [];
+        superstarRosters.forEach((r) => {
+          const u = (r.user_name || '').trim().toUpperCase();
+          if (!u || !statsMap[u]) return;
+          const s1 = resolveCompetitorById(r.star_1_id, competitors, null, sport);
+          const s2 = resolveCompetitorById(r.star_2_id, competitors, null, sport);
+          const s3 = resolveCompetitorById(r.star_3_id, competitors, null, sport);
+          const valid = [s1, s2, s3].filter(Boolean) as Competitor[];
+          if (valid.length > 0) {
+            const ssScore = valid.reduce((sum, p) => sum + getPlayerLivePoints(p, w), 0);
+            superstarScores.push({ userName: u, score: ssScore });
+            weeklySquadGamePoints[u] = (weeklySquadGamePoints[u] || 0) + ssScore;
+            if (ssScore > 0) {
+              statsMap[u].totalGamesPlayed += 1;
+            }
+          }
+        });
+
+        // Award Superstars contest win
+        if (superstarScores.length > 0) {
+          superstarScores.sort((a, b) => b.score - a.score);
+          const topScore = superstarScores[0].score;
+          if (topScore > 0) {
+            const winners = superstarScores.filter((g) => g.score === topScore);
+            if (winners.length === 1) {
+              const wName = winners[0].userName;
+              if (statsMap[wName]) {
+                statsMap[wName].totalSeasonWins += 1;
+                statsMap[wName].outrightWins += 1;
+                statsMap[wName].weekBreakdown[w].wins += 1;
+                statsMap[wName].weekBreakdown[w].outrightWins += 1;
+              }
+            } else if (winners.length > 1) {
+              winners.forEach((win) => {
+                if (statsMap[win.userName]) {
+                  statsMap[win.userName].totalSeasonWins += 1;
+                  statsMap[win.userName].tiedWins += 1;
+                  statsMap[win.userName].weekBreakdown[w].wins += 1;
+                }
+              });
+            }
+          }
+        }
+      }
 
       // Record weekly points total & check weekly champion
       let weeklyHighScore = -1;
@@ -247,7 +350,7 @@ export const SeasonLeaderboard: React.FC<SeasonLeaderboardProps> = ({
       });
 
       // Award weekly title
-      if (weeklyWinnerName && statsMap[weeklyWinnerName]) {
+      if (weeklyWinnerName && statsMap[weeklyWinnerName] && weeklyHighScore > 0) {
         statsMap[weeklyWinnerName].weekBreakdown[w].isWeeklyWinner = true;
         statsMap[weeklyWinnerName].weeklyTitlesWon += 1;
       }
@@ -542,9 +645,13 @@ export const SeasonLeaderboard: React.FC<SeasonLeaderboardProps> = ({
                   {/* Week by Week cells */}
                   {distinctWeeks.map((w) => {
                     const cell = st.weekBreakdown[w];
+                    const isWeekActiveOrFinal = allSeasonMatches.some(
+                      (m) => m.week === w && (m.status === 'final' || m.status === 'live')
+                    );
+                    const hasActivity = cell && (cell.points > 0 || cell.wins > 0);
                     return (
                       <td key={w} className="py-2 px-2 text-center font-pixel text-[10px]">
-                        {cell ? (
+                        {cell && (isWeekActiveOrFinal || hasActivity) ? (
                           <div className="flex flex-col items-center">
                             <span className="font-bold text-[#1e293b] flex items-center gap-0.5">
                               {cell.points}p
@@ -555,7 +662,7 @@ export const SeasonLeaderboard: React.FC<SeasonLeaderboardProps> = ({
                             </span>
                           </div>
                         ) : (
-                          <span className="text-[#94a3b8]">-</span>
+                          <span className="text-[#94a3b8] font-retro text-sm">—</span>
                         )}
                       </td>
                     );

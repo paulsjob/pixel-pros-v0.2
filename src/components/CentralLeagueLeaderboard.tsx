@@ -3,6 +3,8 @@ import { Competitor, Match, SportId, UserRoster } from '../types';
 import { PixelHelmet } from './PixelHelmet';
 import { Trophy, Crown, Medal, ChevronDown, ChevronUp, ArrowRight, Flame, Shield, CheckCircle2 } from 'lucide-react';
 import {
+  getBaseSeasonRoom,
+  resolveCompetitorById,
   resolvePlayerInPool,
   findMatchForPlayer,
   getPlayerScoringDisplay,
@@ -74,7 +76,7 @@ export const CentralLeagueLeaderboard: React.FC<CentralLeagueLeaderboardProps> =
   onSelectSlate,
   onOpenPlayerDetail,
 }) => {
-  const cleanRoom = (roomCode || 'COUCH').trim().toUpperCase();
+  const cleanRoom = getBaseSeasonRoom(roomCode || 'COUCH');
   const activeNormalizedName = (userName || '').trim().toUpperCase();
   const [filterMode, setFilterMode] = useState<'all' | 'live_final' | 'upcoming'>('all');
   const [expandedGames, setExpandedGames] = useState<Record<string, boolean>>({});
@@ -145,9 +147,9 @@ export const CentralLeagueLeaderboard: React.FC<CentralLeagueLeaderboardProps> =
       slateRosters.forEach((r) => {
         const u = (r.user_name || '').trim().toUpperCase();
         if (!u) return;
-        const s1 = resolvePlayerInPool(r.star_1_id, competitors, sport);
-        const s2 = resolvePlayerInPool(r.star_2_id, competitors, sport);
-        const s3 = resolvePlayerInPool(r.star_3_id, competitors, sport);
+        const s1 = resolveCompetitorById(r.star_1_id, competitors, null, sport);
+        const s2 = resolveCompetitorById(r.star_2_id, competitors, null, sport);
+        const s3 = resolveCompetitorById(r.star_3_id, competitors, null, sport);
         const validStars = [s1, s2, s3].filter(Boolean) as Competitor[];
         if (validStars.length > 0) {
           const detailedStars = validStars.map((p) => ({
@@ -281,14 +283,16 @@ export const CentralLeagueLeaderboard: React.FC<CentralLeagueLeaderboardProps> =
       slateRosters.forEach((r) => {
         const u = (r.user_name || '').trim().toUpperCase();
         if (!u || !statsMap[u]) return;
-        const s1 = resolvePlayerInPool(r.star_1_id, competitors, sport);
-        const s2 = resolvePlayerInPool(r.star_2_id, competitors, sport);
-        const s3 = resolvePlayerInPool(r.star_3_id, competitors, sport);
+        const s1 = resolveCompetitorById(r.star_1_id, competitors, null, sport);
+        const s2 = resolveCompetitorById(r.star_2_id, competitors, null, sport);
+        const s3 = resolveCompetitorById(r.star_3_id, competitors, null, sport);
         const validStars = [s1, s2, s3].filter(Boolean) as Competitor[];
         if (validStars.length > 0) {
           const gameScore = validStars.reduce((sum, p) => sum + getPlayerLivePoints(p), 0);
           statsMap[u].totalPoints += gameScore;
-          statsMap[u].gamesPlayed += 1;
+          if (gp.isFinal || gp.isLive || gameScore > 0) {
+            statsMap[u].gamesPlayed += 1;
+          }
           if (gameScore > statsMap[u].highGameScore) {
             statsMap[u].highGameScore = gameScore;
             statsMap[u].highGameSlate = gp.slateKey;

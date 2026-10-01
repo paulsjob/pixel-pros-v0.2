@@ -2095,7 +2095,7 @@ export function computeGameRoomStandings(
   matches: Match[],
   sport: SportId = 'nfl'
 ): GameRoomWinnerSummary {
-  const cleanRoomCode = (cleanRoom || 'COUCH').trim().toUpperCase();
+  const cleanRoomCode = getBaseSeasonRoom(cleanRoom || 'COUCH');
   const targetRoomCode =
     matchPair === 'SUPERSTARS'
       ? cleanRoomCode
@@ -2111,9 +2111,9 @@ export function computeGameRoomStandings(
     const userName = (r.user_name || '').trim().toUpperCase();
     if (!userName) return;
 
-    const s1 = resolvePlayerInPool(r.star_1_id, competitors, sport);
-    const s2 = resolvePlayerInPool(r.star_2_id, competitors, sport);
-    const s3 = resolvePlayerInPool(r.star_3_id, competitors, sport);
+    const s1 = resolveCompetitorById(r.star_1_id, competitors, null, sport);
+    const s2 = resolveCompetitorById(r.star_2_id, competitors, null, sport);
+    const s3 = resolveCompetitorById(r.star_3_id, competitors, null, sport);
     const stars = [s1, s2, s3].filter(Boolean) as Competitor[];
 
     if (stars.length > 0) {
@@ -2160,6 +2160,13 @@ export interface LeagueIdentity {
   weekNumber: number | null; // e.g. 3 for "CUSE_WK3", or null if plain "COUCH"
   isGameSlate: boolean;
   slateMatchup?: string;
+}
+
+export function getBaseSeasonRoom(roomCode: string): string {
+  const clean = (roomCode || 'COUCH').trim().toUpperCase();
+  const roomPart = clean.includes('__') ? clean.split('__')[0] : clean;
+  const normalized = roomPart.replace(/_(?:WK|W|WEEK)\d+$/i, '');
+  return normalized || 'COUCH';
 }
 
 export function parseLeagueIdentity(roomCode: string): LeagueIdentity {

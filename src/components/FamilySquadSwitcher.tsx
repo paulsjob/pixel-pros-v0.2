@@ -178,6 +178,9 @@ export const FamilySquadSwitcher: React.FC<FamilySquadSwitcherProps> = ({
             >
               <Home size={11} className="text-[#38bdf8] shrink-0" />
               <span className="text-[#f59e0b] font-bold tracking-wider max-w-[50px] sm:max-w-none truncate">{roomCode}</span>
+              <span className="text-[7px] sm:text-[8px] px-1 py-0.2 bg-[#f59e0b]/20 text-[#fde047] border border-[#f59e0b]/40 rounded-2xs font-pixel uppercase tracking-wide hidden sm:inline-block">
+                SEASON
+              </span>
               <span className="text-[8px] text-[#93c5fd]">✏️</span>
             </button>
           </div>

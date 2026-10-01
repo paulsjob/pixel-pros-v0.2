@@ -327,6 +327,11 @@ app.get('/api/rosters', async (req: Request, res: Response) => {
   res.json({ success: true, rosters: results });
 });
 
+app.post('/api/admin/reload-db', (_req: Request, res: Response) => {
+  dbState = loadDatabase();
+  res.json({ success: true, count: dbState.rosters.length });
+});
+
 // 4. Upsert a user roster (picks, stars, lock)
 app.post('/api/rosters', (req: Request, res: Response) => {
   const {
@@ -644,10 +649,13 @@ app.post('/api/rosters/clear-stars', (req: Request, res: Response) => {
   res.json({ success: true });
 });
 
-// Helper: Clear all NFL picks when the week turns over (purges past game slates & resets Weekly Superstars)
-async function clearAllNFLWeekPicksServer(): Promise<{ purgedGameSlates: number; resetSuperstars: number }> {
+// Helper: Clear all active NFL picks when the week turns over
+// - Preserves all game slates (__ rooms) as historical records for Season Leaderboard
+// - Archives previous week's Weekly Superstars picks into ${room}_WK${pastWeek} so season totals are saved
+// - Wipes Weekly Superstars picks in active base rooms for the new week so they start totally clean and unlocked
+async function clearAllNFLWeekPicksServer(pastWeekNumber: number = 3): Promise<{ archivedSuperstars: number; resetSuperstars: number }> {
   const nowIso = new Date().toISOString();
-  let purgedGameSlates = 0;
+  let archivedSuperstars = 0;
   let resetSuperstars = 0;
 
   // 1. Reset locks for NFL
@@ -657,17 +665,13 @@ async function clearAllNFLWeekPicksServer(): Promise<{ purgedGameSlates: number;
     }
   }
 
-  // 2. Remove game slate sub-rooms from dbState.rooms
-  if (dbState.rooms) {
-    for (const key of Object.keys(dbState.rooms)) {
-      if (key.includes('__') && (key.endsWith('_nfl') || !key.endsWith('_nba'))) {
-        delete dbState.rooms[key];
-      }
-    }
-  }
-
-  // 3. Clear rosters
+  // 2. Process rosters: Keep game slates untouched!
+  // For base rooms (Weekly Superstars):
+  // - If it had picks, ensure an archived copy exists for pastWeekNumber
+  // - Reset active base room picks to '' and unlocked for the new week!
+  const newArchivedRosters: StoredRoster[] = [];
   const updatedRosters: StoredRoster[] = [];
+
   for (const r of dbState.rosters) {
     const rSport = (r.sport || 'nfl').toLowerCase();
     if (rSport !== 'nfl') {
@@ -675,12 +679,38 @@ async function clearAllNFLWeekPicksServer(): Promise<{ purgedGameSlates: number;
       continue;
     }
     const room = (r.room_code || '').trim().toUpperCase();
-    if (room.includes('__')) {
-      // Obsolete game slate from past week -> completely delete so new games have 0 picks!
-      purgedGameSlates++;
+    if (room.includes('__') || room.match(/(?:_|^)(?:WK|WEEK|W)\d+$/i)) {
+      // Game slate or already-archived week roster: preserve untouched for Season Leaderboard!
+      updatedRosters.push(r);
       continue;
     }
-    // Base room (Weekly Superstars): Keep user squad registered, clear all 3 picks & unlock!
+
+    // Active base room (e.g. BIGBANG, COUCH, THE_BOYS):
+    const hasPicks = Boolean(r.star_1_id || r.star_2_id || r.star_3_id);
+    if (hasPicks) {
+      // Archive to past week if not already archived
+      const archivedRoomCode = `${room}_WK${pastWeekNumber}`;
+      const alreadyArchived = dbState.rosters.some(
+        (ar) => ar.room_code === archivedRoomCode && ar.user_name.toUpperCase() === r.user_name.toUpperCase()
+      );
+      if (!alreadyArchived) {
+        newArchivedRosters.push({
+          id: `archived-${archivedRoomCode}-${r.user_name}`,
+          room_code: archivedRoomCode,
+          user_name: r.user_name,
+          sport: 'nfl',
+          star_1_id: r.star_1_id,
+          star_2_id: r.star_2_id,
+          star_3_id: r.star_3_id,
+          is_locked: true,
+          device_id: 'LOCKED',
+          updated_at: nowIso,
+        });
+        archivedSuperstars++;
+      }
+    }
+
+    // Reset the active base room roster so Weekly Superstars starts completely fresh for the new week!
     resetSuperstars++;
     updatedRosters.push({
       ...r,
@@ -692,13 +722,13 @@ async function clearAllNFLWeekPicksServer(): Promise<{ purgedGameSlates: number;
       updated_at: nowIso,
     });
   }
-  dbState.rosters = updatedRosters;
+
+  dbState.rosters = [...updatedRosters, ...newArchivedRosters];
   saveDatabase(dbState);
 
-  // 4. Supabase cloud database sync if configured
+  // 3. Supabase cloud database sync if configured (never delete __ rosters!)
   if (serverSupabase) {
     try {
-      await serverSupabase.from('user_rosters').delete().like('room_code', '%__%').eq('sport', 'nfl');
       await serverSupabase.from('user_rosters').update({
         star_1_id: '',
         star_2_id: '',
@@ -706,14 +736,14 @@ async function clearAllNFLWeekPicksServer(): Promise<{ purgedGameSlates: number;
         is_locked: false,
         device_id: 'UNLOCKED',
         updated_at: nowIso,
-      }).not('room_code', 'like', '%__%').eq('sport', 'nfl');
+      }).not('room_code', 'like', '%__%').not('room_code', 'like', '%_WK%').eq('sport', 'nfl');
     } catch (e: any) {
       console.warn('[clearAllNFLWeekPicksServer] Supabase sync notice:', e.message);
     }
   }
 
-  console.log(`[Weekly Turnover] Cleared all NFL picks: purged ${purgedGameSlates} stale game slates, reset ${resetSuperstars} Weekly Superstars squads.`);
-  return { purgedGameSlates, resetSuperstars };
+  console.log(`[Weekly Turnover] Fresh week setup: preserved historical slates, archived ${archivedSuperstars} past superstars, cleared ${resetSuperstars} active rosters.`);
+  return { archivedSuperstars, resetSuperstars };
 }
 
 // 9b. Clear all week picks endpoint (for week turnover or manual commissioner action)
@@ -1296,7 +1326,7 @@ async function executeWeeklyTuesdayRescan(isForced = false, targetWeekOverride?:
     weeklyRescanState.lastRescanWeek = newWeek;
     weeklyRescanState.inProgress = false;
 
-    console.log(`[Weekly Rescan] ✓ Tuesday 4:00 AM EST rescan complete for Week ${newWeek}! Purged ${clearStats.purgedGameSlates} game slates, reset ${clearStats.resetSuperstars} Weekly Superstars squads.`);
+    console.log(`[Weekly Rescan] ✓ Tuesday 4:00 AM EST rescan complete for Week ${newWeek}! Archived ${clearStats.archivedSuperstars} past superstars, reset ${clearStats.resetSuperstars} Weekly Superstars squads.`);
 
     // Broadcast SSE to all connected clients so they refresh with fresh picks & week
     const payload = JSON.stringify({
@@ -1466,11 +1496,6 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Pixel Pros server running at http://0.0.0.0:${PORT} [persistent storage enabled]`);
-    // Purge any stale game slate picks from past weeks and clear old picks if week turned over
-    if (dbState.rosters.some((r) => (r.room_code || '').includes('__') && (r.sport || 'nfl').toLowerCase() === 'nfl')) {
-      console.log('[Startup] Stale NFL week picks detected from previous week. Purging old game slates and clearing Weekly Superstars picks...');
-      clearAllNFLWeekPicksServer().catch((e) => console.warn('[Startup] Clear picks error:', e));
-    }
     // Run initial ESPN sync and set periodic interval
     syncESPNToSupabase();
     setInterval(syncESPNToSupabase, 180000);

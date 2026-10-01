@@ -10,6 +10,8 @@ import { isGhostUser, getSquadLockState, fetchRoomRosters } from '../lib/supabas
 import { CentralLeagueLeaderboard } from './CentralLeagueLeaderboard';
 import { SeasonLeaderboard } from './SeasonLeaderboard';
 import {
+  getBaseSeasonRoom,
+  resolveCompetitorById,
   getPlayerScoringDisplay,
   resolvePlayerInPool,
   findMatchForPlayer,
@@ -103,7 +105,7 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
 
   const safeNflPlayers = Array.isArray(nflCompetitors) ? nflCompetitors : [];
   const safeRoomRosters = Array.isArray(roomRosters) ? roomRosters : [];
-  const cleanRoom = (roomCode || 'COUCH').trim().toUpperCase();
+  const cleanRoom = getBaseSeasonRoom(roomCode || 'COUCH');
   const activeNormalizedName = (userName || '').trim().toUpperCase();
 
   // Internal reactive roster state to guarantee zero-lag and self-healing rosters
@@ -431,9 +433,9 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
         } catch {}
       }
 
-      const star1 = resolvePlayerInPool(star1Id, safeNflPlayers, sport) || null;
-      const star2 = resolvePlayerInPool(star2Id, safeNflPlayers, sport) || null;
-      const star3 = resolvePlayerInPool(star3Id, safeNflPlayers, sport) || null;
+      const star1 = resolveCompetitorById(star1Id, safeNflPlayers, null, sport) || null;
+      const star2 = resolveCompetitorById(star2Id, safeNflPlayers, null, sport) || null;
+      const star3 = resolveCompetitorById(star3Id, safeNflPlayers, null, sport) || null;
       const starPlayers = [star1, star2, star3].filter(Boolean) as Competitor[];
       const sumPoints = starPlayers.reduce((sum, p) => sum + getPlayerLivePoints(p), 0);
 
@@ -558,7 +560,7 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
 
   return (
     <div className="leaderboard-column-wrapper w-full max-w-4xl mx-auto px-1 sm:px-3 box-border flex flex-col items-stretch space-y-2.5 sm:space-y-3">
-      {/* 1. Master 4-Way Navigation Bar: [ 🏆 THIS WEEK ] [ 👑 SEASON ] [ 🏈 MATCHUPS ] [ ⭐ TOP STARS ] */}
+      {/* 1. Master 4-Way Navigation Bar: [ 🏆 THIS WEEK ] [ 🏈 MATCHUPS ] [ 👑 SEASON ] [ ⭐ TOP STARS ] */}
       <div className="w-full grid grid-cols-4 gap-1 sm:gap-1.5 box-border p-1 bg-[#0b1a2e] border-2 border-[#1e3a5f] rounded-xs shadow-md">
         <button
           type="button"
@@ -575,19 +577,6 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
 
         <button
           type="button"
-          onClick={() => setViewMode('season')}
-          className={`touch-manipulation py-1.5 sm:py-2 px-1 sm:px-2 font-pixel text-[9px] sm:text-xs rounded-xs border-2 cursor-pointer transition-all flex items-center justify-center gap-1 sm:gap-1.5 font-bold ${
-            viewMode === 'season'
-              ? 'bg-[#ca8a04] text-[#451a03] border-[#fef08a] shadow-[0_2px_0_0_#713f12]'
-              : 'bg-[#1e293b] text-[#cbd5e1] border-[#334155] hover:text-white'
-          }`}
-        >
-          <Crown size={13} className={viewMode === 'season' ? 'text-[#451a03]' : 'text-[#facc15]'} />
-          <span className="truncate">SEASON</span>
-        </button>
-
-        <button
-          type="button"
           onClick={() => {
             setViewMode('game_slates');
             setActiveTier('family');
@@ -600,6 +589,19 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
         >
           <Users size={13} className={viewMode === 'game_slates' ? 'text-[#38bdf8]' : 'text-[#94a3b8]'} />
           <span className="truncate">MATCHUPS</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setViewMode('season')}
+          className={`touch-manipulation py-1.5 sm:py-2 px-1 sm:px-2 font-pixel text-[9px] sm:text-xs rounded-xs border-2 cursor-pointer transition-all flex items-center justify-center gap-1 sm:gap-1.5 font-bold ${
+            viewMode === 'season'
+              ? 'bg-[#ca8a04] text-[#451a03] border-[#fef08a] shadow-[0_2px_0_0_#713f12]'
+              : 'bg-[#1e293b] text-[#cbd5e1] border-[#334155] hover:text-white'
+          }`}
+        >
+          <Crown size={13} className={viewMode === 'season' ? 'text-[#451a03]' : 'text-[#facc15]'} />
+          <span className="truncate">SEASON</span>
         </button>
 
         <button

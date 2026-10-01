@@ -28,8 +28,18 @@ import {
 } from './lib/supabaseClient';
 import { MyTeamView } from './components/MyTeamView';
 
+import { getBaseSeasonRoom, resolveCompetitorById, DEFAULT_NFL_MATCHES, DEFAULT_NFL_COMPETITORS, sortMatchesByKickoffAndStatus, getPlayerScoringDisplay, isPositionAllowedForSlot } from './utils/teamData';
+
+export function getCorrectSlotForPlayer(player: Competitor, sport: SportId = 'nfl'): ActiveSlot {
+  if (sport !== 'nfl') return 'star1';
+  if (isPositionAllowedForSlot('star1', player, 'nfl')) return 'star1';
+  if (isPositionAllowedForSlot('star2', player, 'nfl')) return 'star2';
+  if (isPositionAllowedForSlot('star3', player, 'nfl')) return 'star3';
+  return 'star1';
+}
+
 export function getEffectiveRoomCodeForSlate(rCode: string, slateId?: string): string {
-  const base = (rCode || 'COUCH').trim().toUpperCase();
+  const base = getBaseSeasonRoom(rCode || 'COUCH');
   if (!slateId || slateId === 'SUPERSTARS' || slateId === 'ALL') {
     return base;
   }
@@ -48,7 +58,6 @@ import { CommissionerModal } from './components/CommissionerModal';
 import { copyToClipboard } from './utils/clipboard';
 import { getCurrentNFLWeek, syncESPNData } from './lib/espnSync';
 import { executeCompleteWeeklyRescan, isWeeklyRescanDue } from './lib/rescanEngine';
-import { DEFAULT_NFL_MATCHES, DEFAULT_NFL_COMPETITORS, sortMatchesByKickoffAndStatus, getPlayerScoringDisplay } from './utils/teamData';
 import { DEFAULT_NBA_MATCHES, DEFAULT_NBA_COMPETITORS } from './utils/nbaTeamData';
 import { ROSTER_CACHE_VERSION } from './data/nflRosterManifest';
 import { Users, Trophy, HelpCircle, Share2, ShieldAlert, Plus, X } from 'lucide-react';
@@ -78,10 +87,11 @@ export default function App() {
       const params = new URLSearchParams(window.location.search);
       const urlRoom = params.get('room') || params.get('r');
       if (urlRoom && urlRoom.trim()) {
-        return urlRoom.trim().toUpperCase();
+        return getBaseSeasonRoom(urlRoom.trim().toUpperCase());
       }
       const sport = (localStorage.getItem('pixel_pros_sport') as SportId) || 'nfl';
-      return (localStorage.getItem(`pixel_pros_room_code_${sport}`) || (sport === 'nba' ? 'HOOPS' : 'COUCH')).toUpperCase();
+      const saved = localStorage.getItem(`pixel_pros_room_code_${sport}`);
+      return getBaseSeasonRoom(saved || (sport === 'nba' ? 'HOOPS' : 'COUCH'));
     } catch {
       return 'COUCH';
     }
@@ -196,6 +206,11 @@ export default function App() {
   // 'total_week' = TOTAL WEEK (Weekly Superstars & Mega Battle Leaderboard)
   const [appMode, setAppMode] = useState<'game' | 'total_week'>('game');
   const [activeSlateId, setActiveSlateId] = useState<string>(() => {
+    try {
+      const sport = (localStorage.getItem('pixel_pros_sport') as SportId) || 'nfl';
+      const saved = localStorage.getItem(`pixel_pros_active_slate_${sport}`);
+      if (saved && saved.trim()) return saved.trim();
+    } catch {}
     return 'PIT@CLE';
   });
   const activeSlateIdRef = useRef<string>(activeSlateId);
@@ -248,8 +263,8 @@ export default function App() {
     // 1. Include ALL available rooms stored on the database
     availableRooms.forEach((r) => {
       const rawCode = (r.roomCode || '').trim().toUpperCase();
-      // Strip slate sub-code suffix so slates roll up to the league room
-      const code = rawCode.includes('__') ? rawCode.split('__')[0] : rawCode;
+      // Strip slate sub-code and week suffix so slates and weekly rooms roll up to the persistent season-long room
+      const code = getBaseSeasonRoom(rawCode);
       if (!code) return;
 
       const isProtectedRoom = code === 'BIGBANG' || code === 'COUCH' || code === 'HOOPS';
@@ -297,7 +312,7 @@ export default function App() {
 
     // 2. Ensure current room is always present with its current squads
     const rawCurrentCode = (roomCode || '').trim().toUpperCase();
-    const currentCode = rawCurrentCode.includes('__') ? rawCurrentCode.split('__')[0] : rawCurrentCode;
+    const currentCode = getBaseSeasonRoom(rawCurrentCode);
     if (currentCode) {
       const isProtectedCurrent = currentCode === 'BIGBANG' || currentCode === 'COUCH' || currentCode === 'HOOPS';
       const existing = map.get(currentCode);
@@ -529,6 +544,9 @@ export default function App() {
 
   const handleSelectSlate = (newSlate: string) => {
     setActiveSlateId(newSlate);
+    try {
+      localStorage.setItem(`pixel_pros_active_slate_${currentSport}`, newSlate);
+    } catch {}
     if (newSlate === 'SUPERSTARS') {
       setAppMode('total_week');
     } else {
@@ -555,9 +573,9 @@ export default function App() {
     let initialLock = false;
 
     if (dbRoster) {
-      s1 = masterList.find((a) => a.id === dbRoster.star_1_id) || null;
-      s2 = masterList.find((a) => a.id === dbRoster.star_2_id) || null;
-      s3 = masterList.find((a) => a.id === dbRoster.star_3_id) || null;
+      s1 = resolveCompetitorById(dbRoster.star_1_id, masterList, null, currentSport);
+      s2 = resolveCompetitorById(dbRoster.star_2_id, masterList, null, currentSport);
+      s3 = resolveCompetitorById(dbRoster.star_3_id, masterList, null, currentSport);
       initialLock = Boolean(dbRoster.is_locked || dbRoster.device_id === 'LOCKED');
     } else {
       try {
@@ -565,9 +583,9 @@ export default function App() {
         if (cached) {
           const ids = JSON.parse(cached);
           if (Array.isArray(ids)) {
-            s1 = masterList.find((a) => a.id === ids[0]) || null;
-            s2 = masterList.find((a) => a.id === ids[1]) || null;
-            s3 = masterList.find((a) => a.id === ids[2]) || null;
+            s1 = resolveCompetitorById(ids[0], masterList, null, currentSport);
+            s2 = resolveCompetitorById(ids[1], masterList, null, currentSport);
+            s3 = resolveCompetitorById(ids[2], masterList, null, currentSport);
           }
         }
       } catch {}
@@ -586,6 +604,30 @@ export default function App() {
       if (s1 && !isPlayerInGame(s1)) s1 = null;
       if (s2 && !isPlayerInGame(s2)) s2 = null;
       if (s3 && !isPlayerInGame(s3)) s3 = null;
+    }
+
+    // Slot position auto-aligner: guarantee QB -> star1, RB -> star2, WR/TE -> star3
+    if (currentSport === 'nfl') {
+      const loaded = [s1, s2, s3].filter(Boolean) as Competitor[];
+      if (loaded.length > 0) {
+        const mismatch =
+          (s1 && !isPositionAllowedForSlot('star1', s1, 'nfl')) ||
+          (s2 && !isPositionAllowedForSlot('star2', s2, 'nfl')) ||
+          (s3 && !isPositionAllowedForSlot('star3', s3, 'nfl'));
+        if (mismatch) {
+          let newS1: Competitor | null = null;
+          let newS2: Competitor | null = null;
+          let newS3: Competitor | null = null;
+          for (const p of loaded) {
+            if (!newS1 && isPositionAllowedForSlot('star1', p, 'nfl')) newS1 = p;
+            else if (!newS2 && isPositionAllowedForSlot('star2', p, 'nfl')) newS2 = p;
+            else if (!newS3 && isPositionAllowedForSlot('star3', p, 'nfl')) newS3 = p;
+          }
+          s1 = newS1;
+          s2 = newS2;
+          s3 = newS3;
+        }
+      }
     }
 
     const filledCount = [s1, s2, s3].filter(Boolean).length;
@@ -656,9 +698,9 @@ export default function App() {
 
     if (existingRoster) {
       const masterList = rosterRef.current.length > 0 ? rosterRef.current : roster;
-      s1 = masterList.find((p) => p.id === existingRoster!.star_1_id) || null;
-      s2 = masterList.find((p) => p.id === existingRoster!.star_2_id) || null;
-      s3 = masterList.find((p) => p.id === existingRoster!.star_3_id) || null;
+      s1 = resolveCompetitorById(existingRoster.star_1_id, masterList, null, currentSport);
+      s2 = resolveCompetitorById(existingRoster.star_2_id, masterList, null, currentSport);
+      s3 = resolveCompetitorById(existingRoster.star_3_id, masterList, null, currentSport);
       isLockedFromDb = Boolean(existingRoster.is_locked || existingRoster.device_id === 'LOCKED');
     } else {
       try {
@@ -667,9 +709,9 @@ export default function App() {
           const ids = JSON.parse(cached);
           if (Array.isArray(ids)) {
             const masterList = rosterRef.current.length > 0 ? rosterRef.current : roster;
-            s1 = masterList.find((p) => p.id === ids[0]) || null;
-            s2 = masterList.find((p) => p.id === ids[1]) || null;
-            s3 = masterList.find((p) => p.id === ids[2]) || null;
+            s1 = resolveCompetitorById(ids[0], masterList, null, currentSport);
+            s2 = resolveCompetitorById(ids[1], masterList, null, currentSport);
+            s3 = resolveCompetitorById(ids[2], masterList, null, currentSport);
           }
         }
       } catch {}
@@ -745,7 +787,8 @@ export default function App() {
         localStorage.setItem('pixel_pros_sport', targetSport);
       } catch {}
     }
-    const clean = (newCode || (nextSport === 'nba' ? 'HOOPS' : 'COUCH')).trim().toUpperCase();
+    const rawInput = (newCode || (nextSport === 'nba' ? 'HOOPS' : 'COUCH')).trim().toUpperCase();
+    const clean = getBaseSeasonRoom(rawInput);
     userExplicitlyJoinedRoomRef.current = clean;
     setRoomCode(clean);
     setTempRoomCode(clean);
@@ -816,51 +859,59 @@ export default function App() {
       return;
     }
 
+    let effectiveSlot = targetSlot;
+    if (currentSport === 'nfl') {
+      if (!isPositionAllowedForSlot(targetSlot, player, 'nfl')) {
+        effectiveSlot = getCorrectSlotForPlayer(player, 'nfl');
+        const posReq = effectiveSlot === 'star1' ? 'STAR 1 (QB)' : effectiveSlot === 'star2' ? 'STAR 2 (RB)' : 'STAR 3 (WR/TE)';
+        showToast(`${player.displayName} (${player.position}) placed into ${posReq}!`);
+      }
+    }
+
     const filledCount = [squadSlots.star1, squadSlots.star2, squadSlots.star3].filter(Boolean).length;
     if (filledCount === 3 && isLocked) {
       showToast('Lineup is LOCKED! Tap UNLOCK PICKS to make changes.');
       return;
     }
 
-    setSquadSlots((prev) => {
-      const next: SquadSlots = { ...prev };
-      const isSamePlayer = (slotPlayer: Competitor | null) => {
-        if (!slotPlayer) return false;
-        if (slotPlayer.id === player.id) return true;
-        const sNorm = `${(slotPlayer.displayName || slotPlayer.shortName || '').trim().toLowerCase()}_${(slotPlayer.teamCode || '').trim().toUpperCase()}`;
-        const pNorm = `${(player.displayName || player.shortName || '').trim().toLowerCase()}_${(player.teamCode || '').trim().toUpperCase()}`;
-        return sNorm === pNorm;
-      };
+    const next: SquadSlots = { ...squadSlots };
+    const isSamePlayer = (slotPlayer: Competitor | null) => {
+      if (!slotPlayer) return false;
+      if (slotPlayer.id === player.id) return true;
+      const sNorm = `${(slotPlayer.displayName || slotPlayer.shortName || '').trim().toLowerCase()}_${(slotPlayer.teamCode || '').trim().toUpperCase()}`;
+      const pNorm = `${(player.displayName || player.shortName || '').trim().toLowerCase()}_${(player.teamCode || '').trim().toUpperCase()}`;
+      return sNorm === pNorm;
+    };
 
-      if (isSamePlayer(next.star1) && targetSlot !== 'star1') next.star1 = null;
-      if (isSamePlayer(next.star2) && targetSlot !== 'star2') next.star2 = null;
-      if (isSamePlayer(next.star3) && targetSlot !== 'star3') next.star3 = null;
+    if (isSamePlayer(next.star1) && effectiveSlot !== 'star1') next.star1 = null;
+    if (isSamePlayer(next.star2) && effectiveSlot !== 'star2') next.star2 = null;
+    if (isSamePlayer(next.star3) && effectiveSlot !== 'star3') next.star3 = null;
 
-      next[targetSlot] = player;
-      const newCount = [next.star1, next.star2, next.star3].filter(Boolean).length;
-      const willBeLocked = newCount === 3 && isLocked;
+    next[effectiveSlot] = player;
+    const newCount = [next.star1, next.star2, next.star3].filter(Boolean).length;
+    const willBeLocked = newCount === 3 && isLocked;
 
-      const targetRoom = getEffectiveRoomCodeForSlate(roomCode, activeSlateId);
-      setIsLocked(willBeLocked);
-      setSquadLockState(targetRoom, userName, willBeLocked, currentSport);
-      syncLineupToSupabase(roomCode, userName, next, willBeLocked);
-      return next;
-    });
+    const currentSlate = activeSlateIdRef.current || activeSlateId;
+    const targetRoom = getEffectiveRoomCodeForSlate(roomCode, currentSlate);
 
-    const slotLabel = targetSlot === 'star1' ? 'STAR 1' : targetSlot === 'star2' ? 'STAR 2' : 'STAR 3';
+    setSquadSlots(next);
+    setIsLocked(willBeLocked);
+    setSquadLockState(targetRoom, userName, willBeLocked, currentSport);
+    syncLineupToSupabase(roomCode, userName, next, willBeLocked, currentSport, currentSlate);
+
+    const slotLabel = effectiveSlot === 'star1' ? 'STAR 1' : effectiveSlot === 'star2' ? 'STAR 2' : 'STAR 3';
     showToast(`${player.displayName} assigned to ${slotLabel}!`);
   };
 
   const handleClearSlot = (slotKey: ActiveSlot) => {
     if (!userName) return;
-    const targetRoom = getEffectiveRoomCodeForSlate(roomCode, activeSlateId);
-    setSquadSlots((prev) => {
-      const next = { ...prev, [slotKey]: null };
-      setIsLocked(false);
-      setSquadLockState(targetRoom, userName, false, currentSport);
-      syncLineupToSupabase(roomCode, userName, next, false);
-      return next;
-    });
+    const currentSlate = activeSlateIdRef.current || activeSlateId;
+    const targetRoom = getEffectiveRoomCodeForSlate(roomCode, currentSlate);
+    const next = { ...squadSlots, [slotKey]: null };
+    setSquadSlots(next);
+    setIsLocked(false);
+    setSquadLockState(targetRoom, userName, false, currentSport);
+    syncLineupToSupabase(roomCode, userName, next, false, currentSport, currentSlate);
     showToast(`Cleared ${slotKey.toUpperCase()} slot.`);
   };
 
@@ -868,14 +919,34 @@ export default function App() {
 
   const handleUnlockSquad = () => {
     if (!userName) return;
-    const currentSlate = activeSlateId;
+    const currentSlate = activeSlateIdRef.current || activeSlateId;
     const targetRoom = getEffectiveRoomCodeForSlate(roomCode, currentSlate);
+    const cleanUser = userName.trim().toUpperCase();
     unlockCooldownRef.current = Date.now();
+
     setIsLocked(false);
-    setSquadLockState(targetRoom, userName, false, currentSport);
-    syncLineupToSupabase(roomCode, userName, squadSlots, false, currentSport, currentSlate);
-    toggleSquadLock(targetRoom, userName, false, currentSport).catch(() => {});
-    showToast(`PICKS UNLOCKED for ${userName}!`);
+    setSquadLockState(targetRoom, cleanUser, false, currentSport);
+
+    setRoomRosters((prev) =>
+      prev.map((r) => {
+        if (
+          (r.room_code || '').trim().toUpperCase() === targetRoom &&
+          (r.user_name || '').trim().toUpperCase() === cleanUser
+        ) {
+          return {
+            ...r,
+            is_locked: false,
+            device_id: 'UNLOCKED',
+            updated_at: new Date().toISOString(),
+          };
+        }
+        return r;
+      })
+    );
+
+    syncLineupToSupabase(roomCode, cleanUser, squadSlots, false, currentSport, currentSlate);
+    toggleSquadLock(targetRoom, cleanUser, false, currentSport).catch(() => {});
+    showToast(`PICKS UNLOCKED for ${cleanUser}!`);
   };
 
   const handleLockSquad = (advanceToNext: boolean = true) => {
@@ -884,9 +955,8 @@ export default function App() {
       return;
     }
 
-    // Safety guard: if unlock was triggered less than 750ms ago, ignore lock attempt
-    // This completely prevents accidental double-click from unlocking and immediately re-locking/jumping!
-    if (Date.now() - unlockCooldownRef.current < 750) {
+    // Safety guard: if unlock was triggered less than 1500ms ago, ignore lock attempt
+    if (Date.now() - unlockCooldownRef.current < 1500) {
       return;
     }
 
@@ -1023,9 +1093,9 @@ export default function App() {
             } catch {}
           }
           if (dbRoster) {
-            s1 = (compData || []).find((a) => a.id === dbRoster.star_1_id) || null;
-            s2 = (compData || []).find((a) => a.id === dbRoster.star_2_id) || null;
-            s3 = (compData || []).find((a) => a.id === dbRoster.star_3_id) || null;
+            s1 = resolveCompetitorById(dbRoster.star_1_id, compData || [], null, currentSport);
+            s2 = resolveCompetitorById(dbRoster.star_2_id, compData || [], null, currentSport);
+            s3 = resolveCompetitorById(dbRoster.star_3_id, compData || [], null, currentSport);
             initialLock = Boolean(dbRoster.is_locked || dbRoster.device_id === 'LOCKED');
           } else {
             // Check localStorage
@@ -1034,9 +1104,9 @@ export default function App() {
               if (cached) {
                 const ids = JSON.parse(cached);
                 if (Array.isArray(ids)) {
-                  s1 = (compData || []).find((a) => a.id === ids[0]) || null;
-                  s2 = (compData || []).find((a) => a.id === ids[1]) || null;
-                  s3 = (compData || []).find((a) => a.id === ids[2]) || null;
+                  s1 = resolveCompetitorById(ids[0], compData || [], null, currentSport);
+                  s2 = resolveCompetitorById(ids[1], compData || [], null, currentSport);
+                  s3 = resolveCompetitorById(ids[2], compData || [], null, currentSport);
                 }
               }
             } catch {}
@@ -1056,6 +1126,30 @@ export default function App() {
           if (s1 && !isPlayerInGame(s1)) s1 = null;
           if (s2 && !isPlayerInGame(s2)) s2 = null;
           if (s3 && !isPlayerInGame(s3)) s3 = null;
+        }
+
+        // Slot position auto-aligner: guarantee QB -> star1, RB -> star2, WR/TE -> star3
+        if (currentSport === 'nfl') {
+          const loaded = [s1, s2, s3].filter(Boolean) as Competitor[];
+          if (loaded.length > 0) {
+            const mismatch =
+              (s1 && !isPositionAllowedForSlot('star1', s1, 'nfl')) ||
+              (s2 && !isPositionAllowedForSlot('star2', s2, 'nfl')) ||
+              (s3 && !isPositionAllowedForSlot('star3', s3, 'nfl'));
+            if (mismatch) {
+              let newS1: Competitor | null = null;
+              let newS2: Competitor | null = null;
+              let newS3: Competitor | null = null;
+              for (const p of loaded) {
+                if (!newS1 && isPositionAllowedForSlot('star1', p, 'nfl')) newS1 = p;
+                else if (!newS2 && isPositionAllowedForSlot('star2', p, 'nfl')) newS2 = p;
+                else if (!newS3 && isPositionAllowedForSlot('star3', p, 'nfl')) newS3 = p;
+              }
+              s1 = newS1;
+              s2 = newS2;
+              s3 = newS3;
+            }
+          }
         }
 
         const filledCount = [s1, s2, s3].filter(Boolean).length;
@@ -1152,13 +1246,11 @@ export default function App() {
       setSquadSlots({ star1: null, star2: null, star3: null });
       setIsLocked(false);
       setRoomRosters((prev) =>
-        prev
-          .filter((r) => (r.sport || 'nfl') !== 'nfl' || !r.room_code.includes('__'))
-          .map((r) =>
-            (r.sport || 'nfl') === 'nfl'
-              ? { ...r, star_1_id: '', star_2_id: '', star_3_id: '', is_locked: false, device_id: 'UNLOCKED' }
-              : r
-          )
+        prev.map((r) =>
+          (r.sport || 'nfl') === 'nfl' && !r.room_code.includes('__')
+            ? { ...r, star_1_id: '', star_2_id: '', star_3_id: '', is_locked: false, device_id: 'UNLOCKED' }
+            : r
+        )
       );
       fetchRoomRosters(roomCode, currentSport).then((fresh) => {
         if (fresh) setRoomRosters(fresh);
@@ -1172,13 +1264,11 @@ export default function App() {
       setSquadSlots({ star1: null, star2: null, star3: null });
       setIsLocked(false);
       setRoomRosters((prev) =>
-        prev
-          .filter((r) => (r.sport || 'nfl') !== 'nfl' || !r.room_code.includes('__'))
-          .map((r) =>
-            (r.sport || 'nfl') === 'nfl'
-              ? { ...r, star_1_id: '', star_2_id: '', star_3_id: '', is_locked: false, device_id: 'UNLOCKED' }
-              : r
-          )
+        prev.map((r) =>
+          (r.sport || 'nfl') === 'nfl' && !r.room_code.includes('__')
+            ? { ...r, star_1_id: '', star_2_id: '', star_3_id: '', is_locked: false, device_id: 'UNLOCKED' }
+            : r
+        )
       );
       fetchRoomRosters(roomCode, currentSport).then((fresh) => {
         if (fresh) setRoomRosters(fresh);
@@ -1201,13 +1291,11 @@ export default function App() {
             setSquadSlots({ star1: null, star2: null, star3: null });
             setIsLocked(false);
             setRoomRosters((prev) =>
-              prev
-                .filter((r) => (r.sport || 'nfl') !== 'nfl' || !r.room_code.includes('__'))
-                .map((r) =>
-                  (r.sport || 'nfl') === 'nfl'
-                    ? { ...r, star_1_id: '', star_2_id: '', star_3_id: '', is_locked: false, device_id: 'UNLOCKED' }
-                    : r
-                )
+              prev.map((r) =>
+                (r.sport || 'nfl') === 'nfl' && !r.room_code.includes('__')
+                  ? { ...r, star_1_id: '', star_2_id: '', star_3_id: '', is_locked: false, device_id: 'UNLOCKED' }
+                  : r
+              )
             );
             fetchRoomRosters(roomCode, currentSport).then((fresh) => {
               if (fresh) setRoomRosters(fresh);
@@ -1348,49 +1436,72 @@ export default function App() {
         return nextList;
       });
 
-      // ONLY sync squadSlots from the roomCode remote squad if the user is actively viewing SUPERSTARS
-      // This prevents remote room events from clobbering the user's active game-slate picks!
-      if (activeSlateIdRef.current === 'SUPERSTARS') {
-        const currentClean = (userNameRef.current || '').trim().toUpperCase();
-        if (currentClean) {
-          const remoteSquad = fresh.find((r) => r.user_name.toUpperCase() === currentClean);
-          if (remoteSquad) {
-            const currentRoster = rosterRef.current;
-            const remoteS1Id = remoteSquad.star_1_id || '';
-            const remoteS2Id = remoteSquad.star_2_id || '';
-            const remoteS3Id = remoteSquad.star_3_id || '';
+      const currentClean = (userNameRef.current || '').trim().toUpperCase();
+      const currentSlate = activeSlateIdRef.current || 'SUPERSTARS';
+      const targetRoom = getEffectiveRoomCodeForSlate(roomCode, currentSlate);
 
-            // Re-sync squadSlots: update IDs if remote changed, and always refresh player stats/scores
-            setSquadSlots((prev) => {
-              const curS1 = prev.star1?.id || '';
-              const curS2 = prev.star2?.id || '';
-              const curS3 = prev.star3?.id || '';
-              const hasChanged = curS1 !== remoteS1Id || curS2 !== remoteS2Id || curS3 !== remoteS3Id;
-              if (hasChanged) {
-                return {
-                  star1: currentRoster.find((p) => p.id === remoteS1Id) || null,
-                  star2: currentRoster.find((p) => p.id === remoteS2Id) || null,
-                  star3: currentRoster.find((p) => p.id === remoteS3Id) || null,
-                };
-              }
-              const freshS1 = prev.star1 ? currentRoster.find((p) => p.id === prev.star1!.id) || prev.star1 : null;
-              const freshS2 = prev.star2 ? currentRoster.find((p) => p.id === prev.star2!.id) || prev.star2 : null;
-              const freshS3 = prev.star3 ? currentRoster.find((p) => p.id === prev.star3!.id) || prev.star3 : null;
-              if (freshS1 !== prev.star1 || freshS2 !== prev.star2 || freshS3 !== prev.star3) {
-                return { star1: freshS1, star2: freshS2, star3: freshS3 };
-              }
-              return prev;
-            });
+      if (currentClean) {
+        const remoteSquad = fresh.find(
+          (r) => (r.room_code || '').trim().toUpperCase() === targetRoom && (r.user_name || '').trim().toUpperCase() === currentClean
+        );
+        if (remoteSquad) {
+          const currentRoster = rosterRef.current;
+          let s1 = remoteSquad.star_1_id ? resolveCompetitorById(remoteSquad.star_1_id, currentRoster, null, currentSport) : null;
+          let s2 = remoteSquad.star_2_id ? resolveCompetitorById(remoteSquad.star_2_id, currentRoster, null, currentSport) : null;
+          let s3 = remoteSquad.star_3_id ? resolveCompetitorById(remoteSquad.star_3_id, currentRoster, null, currentSport) : null;
 
-            const isRemoteLocked = Boolean(remoteSquad.is_locked || remoteSquad.device_id === 'LOCKED');
-            setIsLocked((prevLocked) => {
-              if (prevLocked !== isRemoteLocked) {
-                setSquadLockState(roomCode, currentClean, isRemoteLocked, currentSport);
-                return isRemoteLocked;
-              }
-              return prevLocked;
-            });
+          if (currentSlate && currentSlate.includes('@') && currentSlate !== 'SUPERSTARS') {
+            const [awayT, homeT] = currentSlate.split('@').map((t) => (t || '').trim().toUpperCase());
+            const isPlayerInGame = (p: Competitor | null) => {
+              if (!p) return false;
+              const pTeam = (p.teamCode || '').trim().toUpperCase();
+              return pTeam === awayT || pTeam === homeT;
+            };
+            if (s1 && !isPlayerInGame(s1)) s1 = null;
+            if (s2 && !isPlayerInGame(s2)) s2 = null;
+            if (s3 && !isPlayerInGame(s3)) s3 = null;
           }
+
+          // Slot position auto-aligner: ensure QB -> star1, RB -> star2, WR/TE -> star3
+          if (currentSport === 'nfl') {
+            const loaded = [s1, s2, s3].filter(Boolean) as Competitor[];
+            if (loaded.length > 0) {
+              const mismatch =
+                (s1 && !isPositionAllowedForSlot('star1', s1, 'nfl')) ||
+                (s2 && !isPositionAllowedForSlot('star2', s2, 'nfl')) ||
+                (s3 && !isPositionAllowedForSlot('star3', s3, 'nfl'));
+              if (mismatch) {
+                let newS1: Competitor | null = null;
+                let newS2: Competitor | null = null;
+                let newS3: Competitor | null = null;
+                for (const p of loaded) {
+                  if (!newS1 && isPositionAllowedForSlot('star1', p, 'nfl')) newS1 = p;
+                  else if (!newS2 && isPositionAllowedForSlot('star2', p, 'nfl')) newS2 = p;
+                  else if (!newS3 && isPositionAllowedForSlot('star3', p, 'nfl')) newS3 = p;
+                }
+                s1 = newS1;
+                s2 = newS2;
+                s3 = newS3;
+              }
+            }
+          }
+
+          const filledCount = [s1, s2, s3].filter(Boolean).length;
+          const isRemoteLocked = Boolean(remoteSquad.is_locked || remoteSquad.device_id === 'LOCKED') && filledCount === 3;
+
+          setSquadSlots((prev) => {
+            const curS1 = prev.star1?.id || '';
+            const curS2 = prev.star2?.id || '';
+            const curS3 = prev.star3?.id || '';
+            const newS1 = s1?.id || '';
+            const newS2 = s2?.id || '';
+            const newS3 = s3?.id || '';
+            if (curS1 !== newS1 || curS2 !== newS2 || curS3 !== newS3) {
+              return { star1: s1, star2: s2, star3: s3 };
+            }
+            return prev;
+          });
+          setIsLocked(isRemoteLocked);
         }
       }
     });
@@ -1966,7 +2077,9 @@ export default function App() {
                 showToast('Squad is LOCKED! Click [ 🔓 UNLOCK SQUAD ] to make substitutions.');
                 return;
               }
-              const target: ActiveSlot = activeSlot || (!squadSlots.star1 ? 'star1' : !squadSlots.star2 ? 'star2' : !squadSlots.star3 ? 'star3' : 'star1');
+              const target: ActiveSlot = activeSlot && isPositionAllowedForSlot(activeSlot, player, currentSport)
+                ? activeSlot
+                : getCorrectSlotForPlayer(player, currentSport);
               handleAssignSlot(player, target);
               setDetailedPlayer(null);
               setActiveSlot(null);
@@ -2099,8 +2212,11 @@ export default function App() {
                             <div className="flex items-center gap-2 min-w-0">
                               <span className="text-base">{icon}</span>
                               <div className="min-w-0">
-                                <div className="flex items-center gap-1.5">
+                                <div className="flex items-center gap-1.5 flex-wrap">
                                   <span className="font-bold tracking-wider text-xs sm:text-sm">{c.roomCode}</span>
+                                  <span className="text-[7.5px] px-1 py-0.2 bg-[#f59e0b]/20 text-[#b45309] border border-[#f59e0b]/40 font-bold rounded-2xs uppercase">
+                                    SEASON-LONG
+                                  </span>
                                   {isCurrent && (
                                     <span className="text-[8px] px-1 py-0.2 bg-[#f59e0b] text-[#0f172a] font-bold rounded-2xs uppercase">
                                       CURRENT
