@@ -11,6 +11,7 @@ import { CentralLeagueLeaderboard } from './CentralLeagueLeaderboard';
 import { SeasonLeaderboard } from './SeasonLeaderboard';
 import {
   getBaseSeasonRoom,
+  parseLeagueIdentity,
   resolveCompetitorById,
   getPlayerScoringDisplay,
   resolvePlayerInPool,
@@ -194,7 +195,13 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
     // CRITICAL: If the game has not kicked off yet (gameState === 'pre'), active fantasy points are strictly 0.
     // Never fall back to stale or unverified mock scores from the database for unplayed games!
     if (info.gameState === 'pre') return 0;
-    return info.activeScore > 0 ? info.activeScore : 0;
+    if (info.activeScore > 0) return info.activeScore;
+    if (match && (match.status === 'final' || match.status === 'live' || isMatchEnded(match))) {
+      if (p.score && p.score > 0) return p.score;
+      if (p.lastGameScore && p.lastGameScore > 0) return p.lastGameScore;
+      if (info.historicalScore && info.historicalScore > 0) return info.historicalScore;
+    }
+    return 0;
   }, [matches, sport]);
 
   // Top 20 NFL Competitors ordered by live score DESC with rock-solid deterministic secondary tiebreakers
@@ -262,13 +269,25 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
   }, [user.selectedPlayerIds, (user as any).isLocked, cleanRoom, activeNormalizedName, sport]);
 
   const familyListWithDynamicTotals = useMemo(() => {
-    // 1. Gather all unique user names in this room across ALL slates
+    // Current week valid matchup slates from matches (e.g. 'PIT_CLE', 'IND_WSH', etc.)
+    const currentWeekMatchSlates = new Set(
+      sortedMatches.map((m) => {
+        const away = (m.awayTeamCode || m.away_team || '').trim().toUpperCase();
+        const home = (m.homeTeamCode || m.home_team || '').trim().toUpperCase();
+        return `${away}_${home}`;
+      })
+    );
+
+    // 1. Gather all unique user names in this room across current week slates & base room
     const userNames = new Set<string>();
     effectiveRoomRosters.forEach((r) => {
       const rCode = (r.room_code || '').toUpperCase();
-      if (rCode === cleanRoom || rCode.startsWith(`${cleanRoom}__`)) {
-        const u = (r.user_name || '').trim().toUpperCase();
-        if (u && !isGhostUser(u)) userNames.add(u);
+      const parsed = parseLeagueIdentity(rCode);
+      if (parsed.baseLeague === cleanRoom) {
+        if (!parsed.isGameSlate || (parsed.slateMatchup && currentWeekMatchSlates.has(parsed.slateMatchup))) {
+          const u = (r.user_name || '').trim().toUpperCase();
+          if (u && !isGhostUser(u)) userNames.add(u);
+        }
       }
     });
     if (activeNormalizedName) userNames.add(activeNormalizedName);
@@ -277,16 +296,20 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
       const isUser = entryName === activeNormalizedName;
 
       if (leagueSlateFilter === 'MEGA_TOTAL') {
-        // Accumulate across ALL slates for this user in this room
+        // Accumulate across valid current-week slates for this user in this room
         let totalScore = 0;
         let slatesCount = 0;
         let superstarsScore = 0;
-        const allUserRosters = effectiveRoomRosters.filter(
-          (r) =>
-            (r.user_name || '').trim().toUpperCase() === entryName &&
-            ((r.room_code || '').toUpperCase() === cleanRoom ||
-              (r.room_code || '').toUpperCase().startsWith(`${cleanRoom}__`))
-        );
+        const allUserRosters = effectiveRoomRosters.filter((r) => {
+          if ((r.user_name || '').trim().toUpperCase() !== entryName) return false;
+          const rCode = (r.room_code || '').toUpperCase();
+          const parsed = parseLeagueIdentity(rCode);
+          if (parsed.baseLeague !== cleanRoom) return false;
+          if (parsed.isGameSlate && parsed.slateMatchup) {
+            return currentWeekMatchSlates.has(parsed.slateMatchup);
+          }
+          return rCode === cleanRoom;
+        });
 
         // Prioritize persistent database roster with picks; fallback to active session if user
         const dbSuperstarRoster = allUserRosters.find((r) => (r.room_code || '').toUpperCase() === cleanRoom);
@@ -307,8 +330,11 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
           totalScore = superstarsScore;
           slatesCount = 1;
         } else {
-          // Fallback if no Weekly Superstars were drafted yet
-          const gameRosters = allUserRosters.filter((r) => (r.room_code || '').toUpperCase().startsWith(`${cleanRoom}__`));
+          // Fallback if no Weekly Superstars were drafted yet: sum active current-week game slates
+          const gameRosters = allUserRosters.filter((r) => {
+            const parsed = parseLeagueIdentity(r.room_code || '');
+            return parsed.isGameSlate && parsed.slateMatchup && currentWeekMatchSlates.has(parsed.slateMatchup);
+          });
           if (gameRosters.length > 0) {
             totalScore = gameRosters.reduce((sum, r) => {
               const s1 = resolvePlayerInPool(r.star_1_id, safeNflPlayers, sport);
@@ -343,11 +369,26 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
 
         allUserRosters.forEach((r) => {
           const rCode = (r.room_code || '').toUpperCase();
-          if (rCode.startsWith(`${cleanRoom}__`)) {
-            const rawSlateId = rCode.replace(`${cleanRoom}__`, '').replace('_', '@');
-            const s1 = resolvePlayerInPool(r.star_1_id, safeNflPlayers, sport);
-            const s2 = resolvePlayerInPool(r.star_2_id, safeNflPlayers, sport);
-            const s3 = resolvePlayerInPool(r.star_3_id, safeNflPlayers, sport);
+          const parsed = parseLeagueIdentity(rCode);
+          if (parsed.isGameSlate && parsed.slateMatchup && currentWeekMatchSlates.has(parsed.slateMatchup)) {
+            const rawSlateId = parsed.slateMatchup.replace('_', '@');
+            let s1 = resolvePlayerInPool(r.star_1_id, safeNflPlayers, sport);
+            let s2 = resolvePlayerInPool(r.star_2_id, safeNflPlayers, sport);
+            let s3 = resolvePlayerInPool(r.star_3_id, safeNflPlayers, sport);
+
+            // STRICT MATCHUP VALIDATION: Exclude players from other teams
+            if (rawSlateId.includes('@')) {
+              const [awayT, homeT] = rawSlateId.split('@').map((t) => (t || '').trim().toUpperCase());
+              const isPlayerInGame = (p: Competitor | null) => {
+                if (!p) return false;
+                const pTeam = (p.teamCode || (p as any).team || '').trim().toUpperCase();
+                return pTeam === awayT || pTeam === homeT;
+              };
+              if (s1 && !isPlayerInGame(s1)) s1 = null;
+              if (s2 && !isPlayerInGame(s2)) s2 = null;
+              if (s3 && !isPlayerInGame(s3)) s3 = null;
+            }
+
             const stars = [s1, s2, s3];
             const validStars = stars.filter(Boolean) as Competitor[];
             if (validStars.length > 0) {
@@ -368,14 +409,27 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
           slatesCount = superstarPlayers.length > 0 ? 1 : 0;
         }
 
-        // Determine best 3 stars to display for the summary row in MEGA_TOTAL
+        // Determine best 3 stars to display for the summary row in MEGA_TOTAL:
+        // Prioritize:
+        // 1. Weekly Superstars (if drafted)
+        // 2. Active / Completed game with picks in this week (e.g. last night's game PIT@CLE!)
+        // 3. Any upcoming slate in this week with picks
         let displayStars: (Competitor | null)[] = [star1, star2, star3];
         let displaySlateName = '⭐ SUPERSTARS';
         if (superstarPlayers.length === 0 && slateBreakdowns.length > 0) {
-          const firstWithPicks = slateBreakdowns.find((b) => b.stars.filter(Boolean).length > 0);
-          if (firstWithPicks) {
-            displayStars = firstWithPicks.stars;
-            displaySlateName = firstWithPicks.label;
+          const liveOrFinalBreakdown = slateBreakdowns.find((b) => {
+            const raw = b.slateId.replace('@', '_');
+            const m = sortedMatches.find((match) => {
+              const away = (match.awayTeamCode || match.away_team || '').toUpperCase();
+              const home = (match.homeTeamCode || match.home_team || '').toUpperCase();
+              return `${away}_${home}` === raw;
+            });
+            return m && (m.status === 'final' || m.status === 'live');
+          });
+          const bestBreakdown = liveOrFinalBreakdown || slateBreakdowns.find((b) => b.stars.filter(Boolean).length > 0);
+          if (bestBreakdown) {
+            displayStars = bestBreakdown.stars;
+            displaySlateName = bestBreakdown.label;
           }
         }
 
@@ -433,9 +487,23 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
         } catch {}
       }
 
-      const star1 = resolveCompetitorById(star1Id, safeNflPlayers, null, sport) || null;
-      const star2 = resolveCompetitorById(star2Id, safeNflPlayers, null, sport) || null;
-      const star3 = resolveCompetitorById(star3Id, safeNflPlayers, null, sport) || null;
+      let star1 = resolveCompetitorById(star1Id, safeNflPlayers, null, sport) || null;
+      let star2 = resolveCompetitorById(star2Id, safeNflPlayers, null, sport) || null;
+      let star3 = resolveCompetitorById(star3Id, safeNflPlayers, null, sport) || null;
+
+      // STRICT MATCHUP VALIDATION: If viewing a single game (AWAY@HOME), enforce that only players from those 2 teams are displayed!
+      if (leagueSlateFilter && leagueSlateFilter.includes('@') && leagueSlateFilter !== 'SUPERSTARS') {
+        const [awayTeam, homeTeam] = leagueSlateFilter.split('@').map((t) => (t || '').trim().toUpperCase());
+        const isPlayerInGame = (p: Competitor | null) => {
+          if (!p) return false;
+          const pTeam = (p.teamCode || (p as any).team || '').trim().toUpperCase();
+          return pTeam === awayTeam || pTeam === homeTeam;
+        };
+        if (star1 && !isPlayerInGame(star1)) star1 = null;
+        if (star2 && !isPlayerInGame(star2)) star2 = null;
+        if (star3 && !isPlayerInGame(star3)) star3 = null;
+      }
+
       const starPlayers = [star1, star2, star3].filter(Boolean) as Competitor[];
       const sumPoints = starPlayers.reduce((sum, p) => sum + getPlayerLivePoints(p), 0);
 

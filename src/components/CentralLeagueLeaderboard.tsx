@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Competitor, Match, SportId, UserRoster } from '../types';
 import { PixelHelmet } from './PixelHelmet';
-import { Trophy, Crown, Medal, ChevronDown, ChevronUp, ArrowRight, Flame, Shield, CheckCircle2 } from 'lucide-react';
+import { Trophy, Crown, Medal, ChevronDown, ChevronUp, ArrowRight, Flame, Shield, CheckCircle2, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
 import {
   getBaseSeasonRoom,
   resolveCompetitorById,
@@ -10,7 +10,10 @@ import {
   getPlayerScoringDisplay,
   isMatchEnded,
   sortMatchesByKickoffAndStatus,
+  DEFAULT_NFL_MATCHES,
+  parseLeagueIdentity,
 } from '../utils/teamData';
+import { getCurrentNFLWeek } from '../lib/espnSync';
 
 interface CentralLeagueLeaderboardProps {
   roomCode: string;
@@ -81,29 +84,68 @@ export const CentralLeagueLeaderboard: React.FC<CentralLeagueLeaderboardProps> =
   const [filterMode, setFilterMode] = useState<'all' | 'live_final' | 'upcoming'>('all');
   const [expandedGames, setExpandedGames] = useState<Record<string, boolean>>({});
 
+  const allSeasonMatches = useMemo(() => {
+    const map = new Map<string, Match>();
+    if (sport === 'nfl') {
+      DEFAULT_NFL_MATCHES.forEach((m) => map.set(m.id, m));
+    }
+    (matches || []).forEach((m) => map.set(m.id, m));
+    return Array.from(map.values());
+  }, [matches, sport]);
+
+  const activeNFLWeek = sport === 'nfl' ? getCurrentNFLWeek() : 1;
+
+  const availableWeeks = useMemo(() => {
+    const set = new Set<number>();
+    allSeasonMatches.forEach((m) => {
+      if (typeof m.week === 'number') set.add(m.week);
+    });
+    (roomRosters || []).forEach((r) => {
+      const parsed = parseLeagueIdentity(r.room_code || '');
+      if (parsed.weekNumber) set.add(parsed.weekNumber);
+    });
+    if (activeNFLWeek) set.add(activeNFLWeek);
+    const sorted = Array.from(set).sort((a, b) => a - b);
+    return sorted.length > 0 ? sorted : [activeNFLWeek || 4];
+  }, [allSeasonMatches, roomRosters, activeNFLWeek]);
+
+  const [selectedWeek, setSelectedWeek] = useState<number>(() => {
+    if (availableWeeks.includes(activeNFLWeek)) return activeNFLWeek;
+    return availableWeeks[availableWeeks.length - 1] || 4;
+  });
+
+  const weekMatches = useMemo(() => {
+    const filtered = allSeasonMatches.filter((m) => m.week === selectedWeek);
+    return sortMatchesByKickoffAndStatus(filtered.length > 0 ? filtered : matches);
+  }, [allSeasonMatches, selectedWeek, matches]);
+
   const toggleExpandGame = (slateKey: string) => {
     setExpandedGames((prev) => ({ ...prev, [slateKey]: !prev[slateKey] }));
   };
 
-  const getPlayerLivePoints = (p: Competitor | null | undefined): number => {
+  const getPlayerLivePoints = (p: Competitor | null | undefined, m?: Match): number => {
     if (!p) return 0;
-    const match = findMatchForPlayer(p, matches);
+    const match = m || findMatchForPlayer(p, weekMatches);
+    if (!match) return 0;
+    if (match.status === 'upcoming') return 0;
     const info = getPlayerScoringDisplay(p, match, sport);
     if (info.gameState === 'pre') return 0;
-    return info.activeScore > 0 ? info.activeScore : 0;
+    if (info.activeScore > 0) return info.activeScore;
+    if (match.status === 'final' || match.status === 'live' || isMatchEnded(match)) {
+      if (p.score && p.score > 0) return p.score;
+      if (p.lastGameScore && p.lastGameScore > 0) return p.lastGameScore;
+      if (info.historicalScore && info.historicalScore > 0) return info.historicalScore;
+    }
+    return 0;
   };
 
-  const sortedMatches = useMemo(() => {
-    return sortMatchesByKickoffAndStatus(matches || []);
-  }, [matches]);
-
-  // 1. Compute Game Podiums for every match on schedule
+  // 1. Compute Game Podiums for every match on selected week schedule
   const gamePodiums: GamePodiumData[] = useMemo(() => {
-    return sortedMatches.map((m, idx) => {
+    return weekMatches.map((m, idx) => {
       const awayCode = (m.awayTeamCode || m.away_team || '').trim().toUpperCase();
       const homeCode = (m.homeTeamCode || m.home_team || '').trim().toUpperCase();
       const slateKey = `${awayCode}@${homeCode}`;
-      const targetRoom = `${cleanRoom}__${awayCode}_${homeCode}`;
+      const targetSlate = `${awayCode}_${homeCode}`;
 
       const isFinal = isMatchEnded(m);
       const isLive = m.status === 'live';
@@ -133,10 +175,15 @@ export const CentralLeagueLeaderboard: React.FC<CentralLeagueLeaderboardProps> =
         statusText = 'UPCOMING';
       }
 
-      // Filter rosters for this specific game slate
-      const slateRosters = (roomRosters || []).filter(
-        (r) => (r.room_code || '').trim().toUpperCase() === targetRoom
-      );
+      // Robust roster matching for this specific game slate and week
+      const slateRosters = (roomRosters || []).filter((r) => {
+        const parsed = parseLeagueIdentity(r.room_code || '');
+        if (parsed.baseLeague !== cleanRoom) return false;
+        if (!parsed.isGameSlate) return false;
+        if (parsed.slateMatchup !== targetSlate) return false;
+        if (parsed.weekNumber != null && parsed.weekNumber !== selectedWeek) return false;
+        return true;
+      });
 
       const participants: Array<{
         userName: string;
@@ -147,14 +194,22 @@ export const CentralLeagueLeaderboard: React.FC<CentralLeagueLeaderboardProps> =
       slateRosters.forEach((r) => {
         const u = (r.user_name || '').trim().toUpperCase();
         if (!u) return;
-        const s1 = resolveCompetitorById(r.star_1_id, competitors, null, sport);
-        const s2 = resolveCompetitorById(r.star_2_id, competitors, null, sport);
-        const s3 = resolveCompetitorById(r.star_3_id, competitors, null, sport);
+        let s1 = resolveCompetitorById(r.star_1_id, competitors, null, sport);
+        let s2 = resolveCompetitorById(r.star_2_id, competitors, null, sport);
+        let s3 = resolveCompetitorById(r.star_3_id, competitors, null, sport);
+        const isPlayerInGame = (p: Competitor | null) => {
+          if (!p) return false;
+          const pTeam = (p.teamCode || (p as any).team || '').trim().toUpperCase();
+          return pTeam === awayCode || pTeam === homeCode;
+        };
+        if (s1 && !isPlayerInGame(s1)) s1 = null;
+        if (s2 && !isPlayerInGame(s2)) s2 = null;
+        if (s3 && !isPlayerInGame(s3)) s3 = null;
         const validStars = [s1, s2, s3].filter(Boolean) as Competitor[];
         if (validStars.length > 0) {
           const detailedStars = validStars.map((p) => ({
             player: p,
-            points: getPlayerLivePoints(p),
+            points: getPlayerLivePoints(p, m),
           }));
           const totalPoints = detailedStars.reduce((sum, item) => sum + item.points, 0);
           participants.push({
@@ -211,7 +266,7 @@ export const CentralLeagueLeaderboard: React.FC<CentralLeagueLeaderboardProps> =
         winnerNames,
       };
     });
-  }, [sortedMatches, roomRosters, competitors, sport, cleanRoom]);
+  }, [weekMatches, roomRosters, competitors, sport, cleanRoom, selectedWeek]);
 
   // 2. Gather All League Members & Compute Statistics across all games
   const { winsStandings, pointsStandings, championLeader } = useMemo(() => {
@@ -276,19 +331,33 @@ export const CentralLeagueLeaderboard: React.FC<CentralLeagueLeaderboardProps> =
       });
 
       // Sum points for all participants in this game
-      const targetRoom = `${cleanRoom}__${gp.awayCode}_${gp.homeCode}`;
-      const slateRosters = (roomRosters || []).filter(
-        (r) => (r.room_code || '').trim().toUpperCase() === targetRoom
-      );
+      const targetSlate = `${gp.awayCode}_${gp.homeCode}`;
+      const slateRosters = (roomRosters || []).filter((r) => {
+        const parsed = parseLeagueIdentity(r.room_code || '');
+        if (parsed.baseLeague !== cleanRoom) return false;
+        if (!parsed.isGameSlate) return false;
+        if (parsed.slateMatchup !== targetSlate) return false;
+        if (parsed.weekNumber != null && parsed.weekNumber !== selectedWeek) return false;
+        return true;
+      });
+
       slateRosters.forEach((r) => {
         const u = (r.user_name || '').trim().toUpperCase();
         if (!u || !statsMap[u]) return;
-        const s1 = resolveCompetitorById(r.star_1_id, competitors, null, sport);
-        const s2 = resolveCompetitorById(r.star_2_id, competitors, null, sport);
-        const s3 = resolveCompetitorById(r.star_3_id, competitors, null, sport);
+        let s1 = resolveCompetitorById(r.star_1_id, competitors, null, sport);
+        let s2 = resolveCompetitorById(r.star_2_id, competitors, null, sport);
+        let s3 = resolveCompetitorById(r.star_3_id, competitors, null, sport);
+        const isPlayerInGame = (p: Competitor | null) => {
+          if (!p) return false;
+          const pTeam = (p.teamCode || (p as any).team || '').trim().toUpperCase();
+          return pTeam === gp.awayCode || pTeam === gp.homeCode;
+        };
+        if (s1 && !isPlayerInGame(s1)) s1 = null;
+        if (s2 && !isPlayerInGame(s2)) s2 = null;
+        if (s3 && !isPlayerInGame(s3)) s3 = null;
         const validStars = [s1, s2, s3].filter(Boolean) as Competitor[];
         if (validStars.length > 0) {
-          const gameScore = validStars.reduce((sum, p) => sum + getPlayerLivePoints(p), 0);
+          const gameScore = validStars.reduce((sum, p) => sum + getPlayerLivePoints(p, gp.match), 0);
           statsMap[u].totalPoints += gameScore;
           if (gp.isFinal || gp.isLive || gameScore > 0) {
             statsMap[u].gamesPlayed += 1;
@@ -348,16 +417,51 @@ export const CentralLeagueLeaderboard: React.FC<CentralLeagueLeaderboardProps> =
 
   return (
     <div className="w-full space-y-3.5 box-border">
-      {/* 1. CLEAN LEAGUE HEADER */}
-      <div className="w-full py-2.5 px-3.5 sm:px-4 bg-[#0b1a2e] border-2 border-[#1e3a5f] rounded-xs shadow-md flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Trophy size={18} className="text-[#facc15]" />
-          <h1 className="font-pixel text-xs sm:text-sm text-white font-bold tracking-wider uppercase">
-            LEAGUE LEADERBOARD
-          </h1>
+      {/* 1. CLEAN LEAGUE HEADER WITH WEEK SELECTOR */}
+      <div className="w-full p-2.5 sm:p-3 bg-[#0b1a2e] border-2 border-[#1e3a5f] rounded-xs shadow-md space-y-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Trophy size={18} className="text-[#facc15]" />
+            <h1 className="font-pixel text-xs sm:text-sm text-white font-bold tracking-wider uppercase">
+              LEAGUE LEADERBOARD
+            </h1>
+          </div>
+          <div className="font-pixel text-[10px] sm:text-xs text-[#fde047] font-bold">
+            ROOM: {cleanRoom}
+          </div>
         </div>
-        <div className="font-pixel text-[10px] sm:text-xs text-[#fde047] font-bold">
-          ROOM: {cleanRoom}
+
+        {/* Week Switcher Pills */}
+        <div className="flex items-center justify-between pt-1 border-t border-[#1e3a5f]/80 gap-1.5 flex-wrap">
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+            {availableWeeks.map((w) => {
+              const isActive = w === selectedWeek;
+              const isCurrent = w === activeNFLWeek;
+              return (
+                <button
+                  key={w}
+                  type="button"
+                  onClick={() => setSelectedWeek(w)}
+                  className={`touch-manipulation px-2.5 py-1 font-pixel text-[9px] sm:text-[10px] rounded-xs border transition-all cursor-pointer font-bold flex items-center gap-1 ${
+                    isActive
+                      ? 'bg-[#facc15] text-[#451a03] border-[#fef08a] shadow-xs'
+                      : 'bg-[#1e293b] text-[#cbd5e1] border-[#334155] hover:text-white'
+                  }`}
+                >
+                  <Calendar size={11} className={isActive ? 'text-[#451a03]' : 'text-[#94a3b8]'} />
+                  <span>WEEK {w}</span>
+                  {isCurrent && (
+                    <span className="text-[7px] px-1 py-0.2 rounded-2xs bg-[#0284c7] text-white">
+                      LIVE
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          <div className="font-retro text-[11px] text-[#94a3b8]">
+            Showing Week {selectedWeek} Results ({gamePodiums.length} Games)
+          </div>
         </div>
       </div>
 

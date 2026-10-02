@@ -4,6 +4,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import { createClient } from '@supabase/supabase-js';
+import { DEFAULT_NFL_COMPETITORS, resolveCompetitorById } from './src/utils/teamData.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -159,7 +160,8 @@ async function syncWithSupabase(roomCodeFilter?: string) {
         const existingTime = dbState.rosters[existingIdx].updated_at
           ? new Date(dbState.rosters[existingIdx].updated_at).getTime()
           : 0;
-        if (rowTime >= existingTime || dbState.rosters[existingIdx].is_locked !== isLocked) {
+        // Only accept remote changes if the remote row is strictly newer than local in-memory DB
+        if (rowTime > existingTime) {
           dbState.rosters[existingIdx] = record;
           dbState.locks[lockKey] = isLocked;
           hasChanges = true;
@@ -373,6 +375,28 @@ app.post('/api/rosters', (req: Request, res: Response) => {
     finalS1 = existingRoster.star_1_id || '';
     finalS2 = existingRoster.star_2_id || '';
     finalS3 = existingRoster.star_3_id || '';
+  }
+
+  // STRICT GAME VALIDATION: Strip players who do not play in the matchup
+  if (cleanRoom.includes('__')) {
+    const matchupPart = cleanRoom.split('__')[1];
+    if (matchupPart && matchupPart.includes('_')) {
+      const [away, home] = matchupPart.split('_').map((t) => t.toUpperCase());
+      const validatePlayerTeam = (playerId: string) => {
+        if (!playerId) return '';
+        const p = resolveCompetitorById(playerId, DEFAULT_NFL_COMPETITORS, null, cleanSport);
+        if (!p) return playerId;
+        const pTeam = (p.teamCode || (p as any).team || '').trim().toUpperCase();
+        if (pTeam !== away && pTeam !== home) {
+          console.warn(`[Server] Stripping invalid player ${p.displayName} (${pTeam}) for matchup ${away}@${home}`);
+          return '';
+        }
+        return playerId;
+      };
+      finalS1 = validatePlayerTeam(finalS1);
+      finalS2 = validatePlayerTeam(finalS2);
+      finalS3 = validatePlayerTeam(finalS3);
+    }
   }
 
   const starIds = [finalS1, finalS2, finalS3].filter(

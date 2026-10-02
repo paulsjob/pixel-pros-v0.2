@@ -576,7 +576,11 @@ export default function App() {
       s1 = resolveCompetitorById(dbRoster.star_1_id, masterList, null, currentSport);
       s2 = resolveCompetitorById(dbRoster.star_2_id, masterList, null, currentSport);
       s3 = resolveCompetitorById(dbRoster.star_3_id, masterList, null, currentSport);
-      initialLock = Boolean(dbRoster.is_locked || dbRoster.device_id === 'LOCKED');
+      const isExplicitlyUnlocked =
+        dbRoster.is_locked === false ||
+        String(dbRoster.is_locked) === 'false' ||
+        String(dbRoster.device_id).toUpperCase() === 'UNLOCKED';
+      initialLock = !isExplicitlyUnlocked && Boolean(dbRoster.is_locked || dbRoster.device_id === 'LOCKED');
     } else {
       try {
         const cached = localStorage.getItem(`pixel_pros_roster_${currentSport}_${targetRoom}_${cleanUser}`);
@@ -631,7 +635,8 @@ export default function App() {
     }
 
     const filledCount = [s1, s2, s3].filter(Boolean).length;
-    const finalLock = filledCount === 3 && initialLock;
+    const isCooldownActive = Date.now() - unlockCooldownRef.current < 10000;
+    const finalLock = !isCooldownActive && filledCount === 3 && initialLock;
 
     setSquadSlots({ star1: s1, star2: s2, star3: s3 });
     setIsLocked(finalLock);
@@ -701,7 +706,11 @@ export default function App() {
       s1 = resolveCompetitorById(existingRoster.star_1_id, masterList, null, currentSport);
       s2 = resolveCompetitorById(existingRoster.star_2_id, masterList, null, currentSport);
       s3 = resolveCompetitorById(existingRoster.star_3_id, masterList, null, currentSport);
-      isLockedFromDb = Boolean(existingRoster.is_locked || existingRoster.device_id === 'LOCKED');
+      const isExplicitlyUnlocked =
+        existingRoster.is_locked === false ||
+        String(existingRoster.is_locked) === 'false' ||
+        String(existingRoster.device_id).toUpperCase() === 'UNLOCKED';
+      isLockedFromDb = !isExplicitlyUnlocked && Boolean(existingRoster.is_locked || existingRoster.device_id === 'LOCKED');
     } else {
       try {
         const cached = localStorage.getItem(`pixel_pros_roster_${currentSport}_${targetRoom}_${cleanName}`);
@@ -717,10 +726,25 @@ export default function App() {
       } catch {}
     }
 
+    // STRICT GAME VALIDATION: If this slate is a specific matchup (AWAY@HOME),
+    // players MUST belong to AWAY or HOME. Never let players from other games leak in!
+    if (activeSlateId && activeSlateId.includes('@') && activeSlateId !== 'SUPERSTARS') {
+      const [awayTeam, homeTeam] = activeSlateId.split('@').map((t) => (t || '').trim().toUpperCase());
+      const isPlayerInGame = (p: Competitor | null) => {
+        if (!p) return false;
+        const pTeam = (p.teamCode || '').trim().toUpperCase();
+        return pTeam === awayTeam || pTeam === homeTeam;
+      };
+      if (s1 && !isPlayerInGame(s1)) s1 = null;
+      if (s2 && !isPlayerInGame(s2)) s2 = null;
+      if (s3 && !isPlayerInGame(s3)) s3 = null;
+    }
+
     const filledStars = [s1, s2, s3].filter(Boolean) as Competitor[];
     const distinctIds = new Set(filledStars.map((p) => p.id));
     const hasThreeDistinct = filledStars.length === 3 && distinctIds.size === 3;
-    const squadLocked = hasThreeDistinct && isLockedFromDb;
+    const isCooldownActive = Date.now() - unlockCooldownRef.current < 10000;
+    const squadLocked = !isCooldownActive && hasThreeDistinct && isLockedFromDb;
 
     setSquadSlots({ star1: s1, star2: s2, star3: s3 });
     setIsLocked(squadLocked);
@@ -1056,21 +1080,22 @@ export default function App() {
 
         setRoomRosters(rost || []);
 
-        let activeUserClean = userName;
+        let activeUserClean = (userName || '').trim().toUpperCase();
 
-        if (activeUserClean && !validRosters.some((r) => r.user_name.toUpperCase() === activeUserClean)) {
-          if (validRosters.length > 0) {
-            activeUserClean = validRosters[0].user_name.toUpperCase();
-            setUserName(activeUserClean);
-            localStorage.setItem(`pixel_pros_user_${currentSport}_${roomCode}`, activeUserClean);
-          } else {
-            activeUserClean = '';
-            setUserName('');
+        // Safety: If userName is not set at all, check local storage or default;
+        // NEVER forcefully hijack or rename the user's identity to another player's squad in the room!
+        if (!activeUserClean) {
+          try {
+            const saved = localStorage.getItem(`pixel_pros_user_${currentSport}_${roomCode}`);
+            if (saved && saved.trim()) {
+              activeUserClean = saved.trim().toUpperCase();
+            } else {
+              activeUserClean = 'DAD';
+            }
+          } catch {
+            activeUserClean = 'DAD';
           }
-        } else if (!activeUserClean && validRosters.length > 0) {
-          activeUserClean = validRosters[0].user_name.toUpperCase();
           setUserName(activeUserClean);
-          localStorage.setItem(`pixel_pros_user_${currentSport}_${roomCode}`, activeUserClean);
         }
 
         let s1: Competitor | null = null;
@@ -1153,10 +1178,13 @@ export default function App() {
         }
 
         const filledCount = [s1, s2, s3].filter(Boolean).length;
-        const finalLock = activeUserClean ? filledCount === 3 && initialLock : false;
+        const isCooldownActive = Date.now() - unlockCooldownRef.current < 5000;
+        const finalLock = activeUserClean && !isCooldownActive ? filledCount === 3 && initialLock : false;
 
         setSquadSlots({ star1: s1, star2: s2, star3: s3 });
-        setIsLocked(finalLock);
+        if (!isCooldownActive) {
+          setIsLocked(finalLock);
+        }
       } catch (err) {
         console.warn('Room sync error:', err);
       }
@@ -1487,7 +1515,14 @@ export default function App() {
           }
 
           const filledCount = [s1, s2, s3].filter(Boolean).length;
-          const isRemoteLocked = Boolean(remoteSquad.is_locked || remoteSquad.device_id === 'LOCKED') && filledCount === 3;
+          const isExplicitlyUnlocked =
+            remoteSquad.is_locked === false ||
+            String(remoteSquad.is_locked) === 'false' ||
+            String(remoteSquad.device_id).toUpperCase() === 'UNLOCKED';
+          const isRemoteLocked =
+            !isExplicitlyUnlocked &&
+            Boolean(remoteSquad.is_locked || remoteSquad.device_id === 'LOCKED') &&
+            filledCount === 3;
 
           setSquadSlots((prev) => {
             const curS1 = prev.star1?.id || '';
@@ -1501,7 +1536,10 @@ export default function App() {
             }
             return prev;
           });
-          setIsLocked(isRemoteLocked);
+
+          if (Date.now() - unlockCooldownRef.current > 10000) {
+            setIsLocked(isRemoteLocked);
+          }
         }
       }
     });

@@ -1481,11 +1481,18 @@ export async function fetchRoomRosters(roomCode: string, sport: SportId = 'nfl')
       );
       const distinctStars = new Set(starIds);
       const hasThreeDistinct = starIds.length === 3 && distinctStars.size === 3;
-      const isLocked = hasThreeDistinct && Boolean(
-        r.is_locked === true ||
-        r.is_locked === 'true' ||
-        String(r.device_id).toUpperCase() === 'LOCKED'
-      );
+      const isExplicitlyUnlocked =
+        r.is_locked === false ||
+        r.is_locked === 'false' ||
+        String(r.device_id).toUpperCase() === 'UNLOCKED';
+      const isLocked =
+        !isExplicitlyUnlocked &&
+        hasThreeDistinct &&
+        Boolean(
+          r.is_locked === true ||
+          r.is_locked === 'true' ||
+          String(r.device_id).toUpperCase() === 'LOCKED'
+        );
 
       const existing = rosterMap.get(mapKey);
       const entryTime = r.updated_at ? new Date(r.updated_at).getTime() : 0;
