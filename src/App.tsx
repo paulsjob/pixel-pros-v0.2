@@ -46,7 +46,6 @@ export function getEffectiveRoomCodeForSlate(rCode: string, slateId?: string): s
   return `${base}__${slateId.replace('@', '_')}`;
 }
 import { LeaderboardView } from './components/LeaderboardView';
-import { FamilySquadSwitcher } from './components/FamilySquadSwitcher';
 import { SimpleRulesView } from './components/SimpleRulesView';
 import { PlayerCardModal } from './components/PlayerCardModal';
 import { PlayerPickerModal } from './components/PlayerPickerModal';
@@ -459,12 +458,12 @@ export default function App() {
 
     const copied = await copyToClipboard(inviteUrl);
     if (copied) {
-      showToast(`📋 COPIED ROOM ${cleanRoom} INVITE LINK!`);
+      showToast(`📋 COPIED COUCH ${cleanRoom} INVITE LINK!`);
     } else if (navigator.share) {
       try {
         await navigator.share({
           title: `Pixel Pros ${currentSport.toUpperCase()}`,
-          text: `Join room "${cleanRoom}" on Pixel Pros and draft your 3 ${currentSport.toUpperCase()} stars!`,
+          text: `Join couch "${cleanRoom}" on Pixel Pros and draft your 3 ${currentSport.toUpperCase()} stars!`,
           url: inviteUrl,
         });
       } catch {
@@ -1626,11 +1625,14 @@ export default function App() {
     }
 
     const pills = memberNames.map((uName) => {
-      const isCurrent = userName && uName === userName.toUpperCase();
+      const isCurrent = Boolean(userName && uName === userName.toUpperCase());
       if (isCurrent) {
         return {
           userName: uName,
+          name: uName,
           isLocked: isCurrentSquadLocked,
+          isComplete: filledStars.length === 3,
+          isCurrent: true,
           starCount: filledStars.length,
           totalScore: userTotalPoints,
         };
@@ -1656,7 +1658,10 @@ export default function App() {
 
       return {
         userName: uName,
+        name: uName,
         isLocked: squadLocked,
+        isComplete: stars.length === 3,
+        isCurrent: false,
         starCount: stars.length,
         totalScore: stars.reduce((sum, p) => sum + getPlayerLivePoints(p), 0),
       };
@@ -1765,6 +1770,8 @@ export default function App() {
     isLocked: isCurrentSquadLocked,
   };
 
+  const cleanRoom = getBaseSeasonRoom(roomCode || 'COUCH');
+
   return (
     <ErrorBoundary>
       <div className="h-[100dvh] flex flex-col overflow-hidden bg-[#0b1021] text-[#fae5b8] selection:bg-[#12579b] selection:text-white">
@@ -1792,9 +1799,21 @@ export default function App() {
                 <SportSwitcher currentSport={currentSport} onSportChange={handleSportChange} />
               </div>
 
-              {/* Right: Pinned Room badge with edit pencil, compact Admin button & rules button. NEVER cut off! */}
-              {/* Mobile Right Controls: Admin + Scoring Rules */}
+              {/* Mobile Right Controls: Couch + Admin + Scoring Rules */}
               <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTempRoomCode(roomCode);
+                    setIsRoomModalOpen(true);
+                  }}
+                  className="touch-manipulation flex items-center gap-1 px-1.5 py-0.5 bg-[#1a2238] hover:bg-[#283554] border border-[#d4a86a] text-[#fde047] rounded-xs font-pixel text-[9px] cursor-pointer shrink-0"
+                  title={`Couch: ${cleanRoom} (Click to switch)`}
+                >
+                  <span>🛋️</span>
+                  <span className="font-bold truncate max-w-[65px]">{cleanRoom}</span>
+                </button>
+
                 <button
                   type="button"
                   id="mobile-admin-console-btn"
@@ -1897,9 +1916,22 @@ export default function App() {
             <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
               <button
                 type="button"
+                onClick={() => {
+                  setTempRoomCode(roomCode);
+                  setIsRoomModalOpen(true);
+                }}
+                className="touch-manipulation flex items-center gap-1.5 px-2.5 py-1 bg-[#1a2238] hover:bg-[#283554] border border-[#d4a86a] text-[#fde047] rounded-xs font-pixel text-[9px] sm:text-xs cursor-pointer shadow-xs shrink-0"
+                title={`Couch: ${cleanRoom} (Click to switch)`}
+              >
+                <span>🛋️</span>
+                <span className="font-bold">{cleanRoom}</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={handleShareRoom}
                 className="touch-manipulation flex items-center gap-1 px-1.5 py-0.5 sm:px-2 sm:py-1 bg-[#064e3b] hover:bg-[#047857] text-[#34d399] hover:text-white border border-[#059669] rounded-xs font-pixel text-[9px] sm:text-xs cursor-pointer shadow-xs shrink-0"
-                title="Invite to Room"
+                title="Invite to Couch"
               >
                 <Share2 size={11} />
                 <span className="hidden xl:inline">INVITE</span>
@@ -1910,7 +1942,7 @@ export default function App() {
                 id="desktop-admin-console-btn"
                 onClick={() => setIsCommissionerOpen(true)}
                 className="touch-manipulation flex items-center gap-1 px-2 py-0.5 sm:px-2.5 sm:py-1 bg-[#1a2238] hover:bg-[#283554] border border-[#3b82f6]/60 hover:border-[#38bdf8] text-[#38bdf8] rounded-xs font-pixel text-[9px] sm:text-xs cursor-pointer shadow-xs shrink-0"
-                title="Master Admin Console (Manage Rooms, Squads & ESPN Data Sync)"
+                title="Master Admin Console (Manage Couches, Squads & ESPN Data Sync)"
               >
                 <ShieldAlert size={12} className="text-[#38bdf8]" />
                 <span className="hidden sm:inline font-bold">ADMIN</span>
@@ -1926,22 +1958,6 @@ export default function App() {
             </div>
           </div>
         </header>
-
-        <FamilySquadSwitcher
-          activeUserName={userName}
-          roomCode={roomCode}
-          squads={squadPillsData}
-          onSelectSquad={handleSelectSquad}
-          onCreateSquad={handleCreateSquad}
-          onDeleteSquad={handleDeleteSquad}
-          isAddDrawerOpen={isAddSquadDrawerOpen}
-          onOpenAddDrawer={() => setIsAddSquadDrawerOpen(true)}
-          onCloseAddDrawer={() => setIsAddSquadDrawerOpen(false)}
-          onOpenRoomModal={() => {
-            setTempRoomCode(roomCode);
-            setIsRoomModalOpen(true);
-          }}
-        />
 
         {toastMessage && (
           <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 pointer-events-none max-w-[90vw]">
@@ -1983,6 +1999,8 @@ export default function App() {
                 slatePicksStatus={slatePicksStatus}
                 allPlayers={roster}
                 roomRosters={roomRosters}
+                squads={squadPillsData}
+                onSelectSquad={handleSelectSquad}
                 onSwitchToStandings={handleSwitchToBoard}
                 onCommitUserName={(name) => setUserName(name.toUpperCase())}
                 onCommitRoomCode={handleCommitRoomCode}
@@ -2176,7 +2194,7 @@ export default function App() {
                 }}
               >
                 <label className="block font-pixel text-[10px] text-[#5c3509] mb-1 font-bold">
-                  ROOM CODE:
+                  COUCH CODE:
                 </label>
                 <div className="flex gap-2 mb-3.5">
                   <input
@@ -2191,15 +2209,15 @@ export default function App() {
                     type="submit"
                     className="px-3 sm:px-4 py-2 bg-[#12579b] hover:bg-[#1a6cb8] text-[#fae5b8] font-pixel text-xs font-bold rounded-xs cursor-pointer shadow-[0_2px_0_0_#0a2e52] active:translate-y-0.5 whitespace-nowrap"
                   >
-                    JOIN ROOM
+                    JOIN COUCH
                   </button>
                 </div>
 
-                {/* Consolidated Active Database Rooms */}
+                {/* Consolidated Active Database Couches */}
                 <div className="mb-3.5">
                   <div className="flex items-center justify-between mb-2">
                     <span className="font-pixel text-[10px] text-[#5c3509] font-bold flex items-center gap-1">
-                      ⭐ ACTIVE ROOMS ({activeCouches.length}):
+                      ⭐ ACTIVE COUCHES ({activeCouches.length}):
                     </span>
                     <button
                       type="button"
@@ -2208,7 +2226,7 @@ export default function App() {
                         fetchAllActiveRooms(roomCode, currentSport, roomRosters)
                           .then((rooms) => {
                             setAvailableRooms(rooms);
-                            showToast('Refreshed rooms from database!');
+                            showToast('Refreshed couches from database!');
                           })
                           .finally(() => {
                             setIsLoadingRooms(false);
@@ -2223,7 +2241,7 @@ export default function App() {
                   <div className="flex flex-col gap-1.5 max-h-56 overflow-y-auto pr-0.5">
                     {activeCouches.length === 0 ? (
                       <div className="p-3 text-center text-[10px] font-retro text-[#784610] bg-[#ebd2a4]/50 border border-[#c99a57] rounded-xs">
-                        No active rooms found. Enter a code above to start one!
+                        No active couches found. Enter a Couch Code above to start one!
                       </div>
                     ) : (
                       activeCouches.map((c) => {
@@ -2281,7 +2299,7 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Out-of-the-way Archived Rooms Section */}
+                {/* Out-of-the-way Archived Couches Section */}
                 {archivedCouches.length > 0 && (
                   <div className="mb-3.5 pt-2 border-t border-[#d4a86a]/60">
                     <button
@@ -2290,7 +2308,7 @@ export default function App() {
                       className="w-full flex items-center justify-between p-2 bg-[#ebd2a4]/70 hover:bg-[#ebd2a4] border border-[#c99a57] rounded-xs font-pixel text-[10px] text-[#784610] cursor-pointer transition-all"
                     >
                       <span className="flex items-center gap-1.5 font-bold">
-                        <span>📁</span> ARCHIVED ROOMS ({archivedCouches.length})
+                        <span>📁</span> ARCHIVED COUCHES ({archivedCouches.length})
                       </span>
                       <span className="text-[9px] font-bold text-[#12579b]">
                         {showArchivedInSwitcher ? '▲ HIDE ARCHIVED' : '▼ SHOW ARCHIVED'}

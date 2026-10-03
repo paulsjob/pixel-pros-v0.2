@@ -703,6 +703,8 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
             setViewMode('game_slates');
           }}
           onOpenPlayerDetail={onOpenPlayerDetail}
+          onSelectSquad={onSelectSquad}
+          onSwitchToPicks={onSwitchToPicks}
         />
       )}
 
@@ -904,10 +906,10 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
 
             <div className="flex-1 flex flex-col items-center justify-center px-1 text-center">
               <div className="font-pixel text-[22px] sm:text-[32px] leading-tight font-bold tracking-wider text-[#fde047] drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)]">
-                MEGA BATTLE
+                COUCH BATTLE
               </div>
               <div className="mt-0.5 font-pixel text-[9px] sm:text-[10px] text-[#93c5fd] tracking-wide uppercase font-bold">
-                ALL GAMES TOTAL
+                FULL COUCH TOTAL
               </div>
             </div>
 

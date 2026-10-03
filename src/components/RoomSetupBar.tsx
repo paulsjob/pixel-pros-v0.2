@@ -136,10 +136,10 @@ export const RoomSetupBar: React.FC<RoomSetupBarProps> = ({
             </div>
           </div>
 
-          {/* ROOM INPUT */}
+          {/* COUCH INPUT */}
           <div className="flex items-center gap-1.5 flex-1 sm:flex-initial">
             <label htmlFor="room-code-input" className="font-pixel text-[10px] sm:text-xs text-[#f59e0b] whitespace-nowrap">
-              ROOM:
+              COUCH:
             </label>
             <div className="flex items-center gap-1 w-full sm:w-auto">
               <input
@@ -162,7 +162,7 @@ export const RoomSetupBar: React.FC<RoomSetupBarProps> = ({
                   type="button"
                   onClick={handleRoomBlurOrEnter}
                   className="touch-manipulation px-2 py-1 bg-[#f59e0b] hover:bg-[#fbbf24] text-[#451a03] border border-[#b45309] font-pixel text-[10px] rounded-2xs cursor-pointer shadow-xs active:translate-y-0.5 shrink-0 font-bold"
-                  title="Join Room"
+                  title="Join Couch"
                 >
                   JOIN
                 </button>
@@ -178,8 +178,8 @@ export const RoomSetupBar: React.FC<RoomSetupBarProps> = ({
                 }`}
                 title={
                   isArchived
-                    ? 'This room is ARCHIVED. Click to unarchive.'
-                    : 'Archive this room to clear it from the active board.'
+                    ? 'This Couch is ARCHIVED. Click to unarchive.'
+                    : 'Archive this Couch to clear it from the active board.'
                 }
               >
                 {isArchived ? (

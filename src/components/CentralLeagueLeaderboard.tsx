@@ -1,7 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { Competitor, Match, SportId, UserRoster } from '../types';
 import { PixelHelmet } from './PixelHelmet';
-import { Trophy, Crown, Medal, ChevronDown, ChevronUp, ArrowRight, Flame, Shield, CheckCircle2, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
+import { Trophy, Crown, Medal, ChevronDown, ChevronUp, ArrowRight, Flame, Shield, CheckCircle2, ChevronLeft, ChevronRight, Calendar, BarChart2, Users } from 'lucide-react';
 import {
   getBaseSeasonRoom,
   resolveCompetitorById,
@@ -24,6 +24,8 @@ interface CentralLeagueLeaderboardProps {
   competitors: Competitor[];
   onSelectSlate?: (slateId: string) => void;
   onOpenPlayerDetail?: (player: Competitor) => void;
+  onSelectSquad?: (squadName: string) => void;
+  onSwitchToPicks?: () => void;
 }
 
 export interface GamePodiumEntry {
@@ -78,11 +80,39 @@ export const CentralLeagueLeaderboard: React.FC<CentralLeagueLeaderboardProps> =
   competitors = [],
   onSelectSlate,
   onOpenPlayerDetail,
+  onSelectSquad,
+  onSwitchToPicks,
 }) => {
   const cleanRoom = getBaseSeasonRoom(roomCode || 'COUCH');
   const activeNormalizedName = (userName || '').trim().toUpperCase();
+  const [showNerdStats, setShowNerdStats] = useState(false);
   const [filterMode, setFilterMode] = useState<'all' | 'live_final' | 'upcoming'>('all');
   const [expandedGames, setExpandedGames] = useState<Record<string, boolean>>({});
+  const [expandedStandingsUser, setExpandedStandingsUser] = useState<string | null>(null);
+
+  const getUserStars = useCallback(
+    (uName: string) => {
+      const norm = (uName || '').trim().toUpperCase();
+      const superRoster = (roomRosters || []).find((r) => {
+        const p = parseLeagueIdentity(r.room_code || '');
+        return (
+          p.baseLeague === cleanRoom &&
+          (!p.isGameSlate || r.room_code === cleanRoom) &&
+          (r.user_name || '').trim().toUpperCase() === norm
+        );
+      });
+      if (!superRoster) return [];
+      const s1 = resolveCompetitorById(superRoster.star_1_id, competitors, null, sport);
+      const s2 = resolveCompetitorById(superRoster.star_2_id, competitors, null, sport);
+      const s3 = resolveCompetitorById(superRoster.star_3_id, competitors, null, sport);
+      return [
+        { slotLabel: 'QB', player: s1 },
+        { slotLabel: 'RB', player: s2 },
+        { slotLabel: 'WR/TE', player: s3 },
+      ].filter((x) => Boolean(x.player)) as Array<{ slotLabel: string; player: Competitor }>;
+    },
+    [roomRosters, cleanRoom, competitors, sport]
+  );
 
   const allSeasonMatches = useMemo(() => {
     const map = new Map<string, Match>();
@@ -423,11 +453,11 @@ export const CentralLeagueLeaderboard: React.FC<CentralLeagueLeaderboardProps> =
           <div className="flex items-center gap-2">
             <Trophy size={18} className="text-[#facc15]" />
             <h1 className="font-pixel text-xs sm:text-sm text-white font-bold tracking-wider uppercase">
-              LEAGUE LEADERBOARD
+              COUCH LEADERBOARD
             </h1>
           </div>
           <div className="font-pixel text-[10px] sm:text-xs text-[#fde047] font-bold">
-            ROOM: {cleanRoom}
+            COUCH: {cleanRoom}
           </div>
         </div>
 
@@ -459,139 +489,89 @@ export const CentralLeagueLeaderboard: React.FC<CentralLeagueLeaderboardProps> =
               );
             })}
           </div>
-          <div className="font-retro text-[11px] text-[#94a3b8]">
-            Showing Week {selectedWeek} Results ({gamePodiums.length} Games)
+          <div className="font-sans text-[11px] text-[#94a3b8] font-medium">
+            Week {selectedWeek} · {gamePodiums.length} Games
           </div>
         </div>
       </div>
 
-      {/* 2. THE TWO STANDINGS CARDS (WINS & POINTS) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full box-border">
-        {/* CARD A: MOST WINS */}
-        <div className="pixel-box-cream p-3 rounded-xs w-full shadow-[0_3px_0_0_#c99a57] border-2 border-[#c99a57]">
-          <div className="flex items-center gap-2 pb-2 mb-2 border-b-2 border-[#d4a86a]">
-            <Crown size={15} className="text-[#ca8a04]" />
+      {/* 2. MARIO KART STYLE UNIFIED STANDINGS (SIMPLE 1ST-4TH RANKING BASED ON TOTAL POINTS) */}
+      <div className="pixel-box-cream p-3 sm:p-4 rounded-xs w-full shadow-[0_3px_0_0_#c99a57] border-2 border-[#c99a57] box-border">
+        <div className="flex items-center justify-between pb-2 mb-3 border-b-2 border-[#d4a86a] gap-2 flex-wrap">
+          <div className="flex items-center gap-2">
+            <Trophy size={18} className="text-[#ca8a04]" />
             <h2 className="font-pixel text-xs sm:text-sm text-[#5c3509] font-bold tracking-wider uppercase">
-              MOST WINS
+              WEEK {selectedWeek} STANDINGS
             </h2>
           </div>
-
-          <div className="space-y-1.5">
-            {winsStandings.length === 0 ? (
-              <div className="py-4 text-center font-retro text-xs text-[#784610]">
-                No squads have picked yet.
-              </div>
-            ) : (
-              winsStandings.map((st, idx) => {
-                const isFirst = idx === 0 && st.totalWins > 0;
-                return (
-                  <div
-                    key={st.userName}
-                    className={`p-2 rounded-xs border-2 transition-all flex items-center justify-between gap-2 ${
-                      st.isYou
-                        ? 'bg-[#155e9e] text-[#fae5b8] border-[#38bdf8] shadow-xs'
-                        : isFirst
-                        ? 'bg-[#fef08a] text-[#713f12] border-[#ca8a04] shadow-xs'
-                        : 'bg-[#faebd0] text-[#5c3509] border-[#d4a86a]'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <div
-                        className={`w-6 h-6 rounded-2xs flex items-center justify-center font-pixel text-[10px] font-bold shrink-0 border ${
-                          isFirst
-                            ? 'bg-[#ca8a04] text-white border-[#854d0e]'
-                            : st.isYou
-                            ? 'bg-[#0369a1] text-white border-[#38bdf8]'
-                            : 'bg-[#ebd2a4] text-[#784610] border-[#c99a57]'
-                        }`}
-                      >
-                        {isFirst ? '👑' : `${idx + 1}`}
-                      </div>
-
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-pixel text-xs sm:text-sm font-bold truncate">
-                            {st.userName}
-                          </span>
-                          {st.isYou && (
-                            <span className="font-pixel text-[8px] bg-[#38bdf8] text-[#082f49] px-1 py-0.2 rounded-2xs font-bold shrink-0">
-                              YOU
-                            </span>
-                          )}
-                        </div>
-                        <span
-                          className={`font-retro text-[11px] block ${
-                            st.isYou ? 'text-[#bae6fd]' : 'text-[#784610]'
-                          }`}
-                        >
-                          {st.outrightWins} Outright · {st.tiedWins} Tied
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="text-right shrink-0">
-                      <div
-                        className={`font-pixel text-xs sm:text-sm font-bold px-2 py-0.5 rounded-xs border inline-block ${
-                          isFirst
-                            ? 'bg-[#ca8a04] text-white border-[#854d0e]'
-                            : st.isYou
-                            ? 'bg-[#0284c7] text-white border-[#38bdf8]'
-                            : 'bg-[#ebd2a4] text-[#784610] border-[#c99a57]'
-                        }`}
-                      >
-                        {st.totalWins} {st.totalWins === 1 ? 'WIN' : 'WINS'}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
+          <button
+            type="button"
+            onClick={() => setShowNerdStats((v) => !v)}
+            className={`touch-manipulation px-2.5 py-1 rounded-xs font-pixel text-[9px] sm:text-[10px] border-2 cursor-pointer transition-all flex items-center gap-1.5 font-bold shadow-xs active:translate-y-0.5 ${
+              showNerdStats
+                ? 'bg-[#12579b] text-[#fae5b8] border-[#0a2d52]'
+                : 'bg-[#ebd2a4] hover:bg-[#fae5b8] text-[#5c3509] border-[#c99a57]'
+            }`}
+            title="Toggle advanced statistical breakdown"
+          >
+            <BarChart2 size={12} className={showNerdStats ? 'text-[#38bdf8]' : 'text-[#784610]'} />
+            <span>{showNerdStats ? '🤓 NERD STATS: ON' : '🤓 NERD STATS: OFF'}</span>
+          </button>
         </div>
 
-        {/* CARD B: TOTAL POINTS */}
-        <div className="pixel-box-cream p-3 rounded-xs w-full shadow-[0_3px_0_0_#c99a57] border-2 border-[#c99a57]">
-          <div className="flex items-center gap-2 pb-2 mb-2 border-b-2 border-[#d4a86a]">
-            <Trophy size={15} className="text-[#12579b]" />
-            <h2 className="font-pixel text-xs sm:text-sm text-[#5c3509] font-bold tracking-wider uppercase">
-              TOTAL POINTS
-            </h2>
-          </div>
+        <div className="space-y-2">
+          {pointsStandings.length === 0 ? (
+            <div className="py-6 text-center font-sans text-xs text-[#784610]">
+              No points scored yet in Week {selectedWeek}.
+            </div>
+          ) : (
+            pointsStandings.map((st, idx) => {
+              const isFirst = idx === 0 && st.totalPoints > 0;
+              const isSecond = idx === 1 && st.totalPoints > 0;
+              const isThird = idx === 2 && st.totalPoints > 0;
+              const isExpanded = expandedStandingsUser === st.userName;
+              const squadStars = isExpanded ? getUserStars(st.userName) : [];
 
-          <div className="space-y-1.5">
-            {pointsStandings.length === 0 ? (
-              <div className="py-4 text-center font-retro text-xs text-[#784610]">
-                No points scored yet.
-              </div>
-            ) : (
-              pointsStandings.map((st, idx) => {
-                const isFirst = idx === 0 && st.totalPoints > 0;
-                return (
+              return (
+                <div
+                  key={st.userName}
+                  className={`rounded-xs border-2 transition-all overflow-hidden ${
+                    st.isYou
+                      ? 'bg-[#155e9e] text-[#fae5b8] border-[#38bdf8] shadow-xs'
+                      : isFirst
+                      ? 'bg-[#fef08a] text-[#713f12] border-[#ca8a04] shadow-xs ring-1 ring-[#fde047]'
+                      : isSecond
+                      ? 'bg-[#f1f5f9] text-[#1e293b] border-[#cbd5e1] shadow-xs'
+                      : isThird
+                      ? 'bg-[#ffedd5] text-[#7c2d12] border-[#fdba74] shadow-xs'
+                      : 'bg-[#faebd0] text-[#5c3509] border-[#d4a86a]'
+                  }`}
+                >
+                  {/* Clickable Header Row: Tap to inspect roster */}
                   <div
-                    key={st.userName}
-                    className={`p-2 rounded-xs border-2 transition-all flex items-center justify-between gap-2 ${
-                      st.isYou
-                        ? 'bg-[#155e9e] text-[#fae5b8] border-[#38bdf8] shadow-xs'
-                        : isFirst
-                        ? 'bg-[#fef08a] text-[#713f12] border-[#ca8a04] shadow-xs'
-                        : 'bg-[#faebd0] text-[#5c3509] border-[#d4a86a]'
-                    }`}
+                    onClick={() => setExpandedStandingsUser((prev) => (prev === st.userName ? null : st.userName))}
+                    className="p-2.5 sm:p-3 flex items-center justify-between gap-3 cursor-pointer select-none"
+                    title={`Tap to ${isExpanded ? 'hide' : 'view'} ${st.userName}'s roster`}
                   >
-                    <div className="flex items-center gap-2 min-w-0">
+                    <div className="flex items-center gap-2.5 min-w-0">
                       <div
-                        className={`w-6 h-6 rounded-2xs flex items-center justify-center font-pixel text-[10px] font-bold shrink-0 border ${
+                        className={`w-7 h-7 sm:w-8 sm:h-8 rounded-2xs flex items-center justify-center font-pixel text-xs sm:text-sm font-bold shrink-0 border ${
                           isFirst
-                            ? 'bg-[#ca8a04] text-white border-[#854d0e]'
+                            ? 'bg-[#ca8a04] text-white border-[#854d0e] shadow-xs'
+                            : isSecond
+                            ? 'bg-[#94a3b8] text-white border-[#64748b] shadow-xs'
+                            : isThird
+                            ? 'bg-[#b45309] text-white border-[#78350f] shadow-xs'
                             : st.isYou
                             ? 'bg-[#0369a1] text-white border-[#38bdf8]'
                             : 'bg-[#ebd2a4] text-[#784610] border-[#c99a57]'
                         }`}
                       >
-                        {isFirst ? '🏆' : `${idx + 1}`}
+                        {isFirst ? '🥇' : isSecond ? '🥈' : isThird ? '🥉' : `${idx + 1}`}
                       </div>
 
                       <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="font-pixel text-xs sm:text-sm font-bold truncate">
                             {st.userName}
                           </span>
@@ -600,20 +580,26 @@ export const CentralLeagueLeaderboard: React.FC<CentralLeagueLeaderboardProps> =
                               YOU
                             </span>
                           )}
+                          {isFirst && (
+                            <span className="text-xs select-none">👑</span>
+                          )}
                         </div>
-                        <span
-                          className={`font-retro text-[11px] block ${
-                            st.isYou ? 'text-[#bae6fd]' : 'text-[#784610]'
-                          }`}
-                        >
-                          {st.avgPPG} PPG · {st.gamesPlayed} Games
-                        </span>
+                        <div className="font-sans text-[11px] sm:text-xs font-medium truncate mt-0.5 opacity-90">
+                          {isFirst
+                            ? '🏆 Leading the Couch!'
+                            : st.pointsBehind > 0
+                            ? `${st.pointsBehind} pts behind 1st place`
+                            : 'Tied for 1st place!'}
+                          <span className="ml-1 text-[10px] opacity-75 font-normal">
+                            · {isExpanded ? 'Tap to close roster ▲' : 'Tap to view roster ▼'}
+                          </span>
+                        </div>
                       </div>
                     </div>
 
-                    <div className="text-right shrink-0">
+                    <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
                       <div
-                        className={`font-pixel text-xs sm:text-sm font-bold px-2 py-0.5 rounded-xs border inline-block ${
+                        className={`font-pixel text-xs sm:text-sm font-bold px-2.5 py-1 rounded-xs border inline-block ${
                           isFirst
                             ? 'bg-[#ca8a04] text-white border-[#854d0e]'
                             : st.isYou
@@ -623,16 +609,271 @@ export const CentralLeagueLeaderboard: React.FC<CentralLeagueLeaderboardProps> =
                       >
                         {st.totalPoints} PTS
                       </div>
+                      <span className="font-pixel text-[10px] opacity-60">
+                        {isExpanded ? '▲' : '▼'}
+                      </span>
                     </div>
                   </div>
-                );
-              })
-            )}
-          </div>
+
+                  {/* Expandable Roster Inspection Drawer */}
+                  {isExpanded && (
+                    <div className="p-2.5 sm:p-3 bg-[#0a1226] text-[#fae5b8] border-t-2 border-[#1e293b] space-y-2 animate-in fade-in duration-150">
+                      <div className="flex items-center justify-between pb-1.5 border-b border-[#1e293b]">
+                        <span className="font-pixel text-[9px] sm:text-[10px] text-[#93c5fd] font-bold tracking-wider uppercase flex items-center gap-1">
+                          <Users size={12} className="text-[#38bdf8]" />
+                          <span>{st.userName}&apos;S WEEK {selectedWeek} ROSTER</span>
+                        </span>
+                        {st.isYou && onSwitchToPicks && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onSwitchToPicks();
+                            }}
+                            className="touch-manipulation px-2 py-0.5 bg-[#facc15] hover:bg-[#fde047] text-[#451a03] font-pixel text-[8px] sm:text-[9px] font-bold rounded-2xs border border-[#ca8a04] cursor-pointer shadow-xs active:translate-y-0.5"
+                          >
+                            ⚡ EDIT PICKS ➔
+                          </button>
+                        )}
+                      </div>
+
+                      {squadStars.length === 0 ? (
+                        <div className="py-3 text-center font-sans text-xs text-[#94a3b8]">
+                          No superstar picks submitted for this week yet.
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          {squadStars.map(({ slotLabel, player }) => {
+                            const pScore = getPlayerLivePoints(player);
+                            return (
+                              <div
+                                key={player.id}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onOpenPlayerDetail?.(player);
+                                }}
+                                className="p-2 bg-[#121c38] hover:bg-[#1a2950] border border-[#273860] hover:border-[#38bdf8] rounded-xs cursor-pointer transition-all flex items-center justify-between gap-2 shadow-xs"
+                                title={`Tap to view full scout card for ${player.displayName}`}
+                              >
+                                <div className="flex items-center gap-2 min-w-0">
+                                  {player.teamCode ? (
+                                    <PixelHelmet teamCode={player.teamCode} size={22} className="shrink-0" />
+                                  ) : (
+                                    <span className="text-base select-none shrink-0">⭐</span>
+                                  )}
+                                  <div className="min-w-0">
+                                    <div className="font-sans text-[10px] text-[#38bdf8] font-bold uppercase tracking-wider">
+                                      {slotLabel} · {player.position}
+                                    </div>
+                                    <div className="font-pixel text-[10px] text-white font-bold truncate">
+                                      {player.shortName || player.displayName}
+                                    </div>
+                                    <div className="font-sans text-[10px] text-[#94a3b8] truncate">
+                                      {player.teamCode}
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="text-right shrink-0">
+                                  <span className="font-pixel text-[11px] text-[#facc15] font-bold block">
+                                    {pScore} PTS
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      <div className="pt-1 flex items-center justify-between text-[10px] font-sans text-[#64748b]">
+                        <span>Tap any superstar to inspect game log & stats</span>
+                        <span className="font-bold text-[#94a3b8]">{st.gamesPlayed} games played</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
         </div>
       </div>
 
-      {/* 3. PODIUMS GRID */}
+      {/* 3. PROGRESSIVE DISCLOSURE: NERD STATS & ADVANCED BREAKDOWN */}
+      {showNerdStats && (
+        <div className="space-y-3.5 border-t-2 border-[#d4a86a] pt-3 animate-in fade-in duration-150">
+          <div className="flex items-center gap-2 px-1">
+            <BarChart2 size={16} className="text-[#38bdf8]" />
+            <h3 className="font-pixel text-xs text-[#fae5b8] font-bold tracking-wider uppercase">
+              📊 ADVANCED BREAKDOWN & NERD STATS
+            </h3>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full box-border">
+            {/* CARD A: MOST WINS */}
+            <div className="pixel-box-cream p-3 rounded-xs w-full shadow-[0_3px_0_0_#c99a57] border-2 border-[#c99a57]">
+              <div className="flex items-center gap-2 pb-2 mb-2 border-b-2 border-[#d4a86a]">
+                <Crown size={15} className="text-[#ca8a04]" />
+                <h2 className="font-pixel text-xs sm:text-sm text-[#5c3509] font-bold tracking-wider uppercase">
+                  MOST WINS
+                </h2>
+              </div>
+
+              <div className="space-y-1.5">
+                {winsStandings.length === 0 ? (
+                  <div className="py-4 text-center font-sans text-xs text-[#784610]">
+                    No squads have picked yet.
+                  </div>
+                ) : (
+                  winsStandings.map((st, idx) => {
+                    const isFirst = idx === 0 && st.totalWins > 0;
+                    return (
+                      <div
+                        key={st.userName}
+                        className={`p-2 rounded-xs border-2 transition-all flex items-center justify-between gap-2 ${
+                          st.isYou
+                            ? 'bg-[#155e9e] text-[#fae5b8] border-[#38bdf8] shadow-xs'
+                            : isFirst
+                            ? 'bg-[#fef08a] text-[#713f12] border-[#ca8a04] shadow-xs'
+                            : 'bg-[#faebd0] text-[#5c3509] border-[#d4a86a]'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div
+                            className={`w-6 h-6 rounded-2xs flex items-center justify-center font-pixel text-[10px] font-bold shrink-0 border ${
+                              isFirst
+                                ? 'bg-[#ca8a04] text-white border-[#854d0e]'
+                                : st.isYou
+                                ? 'bg-[#0369a1] text-white border-[#38bdf8]'
+                                : 'bg-[#ebd2a4] text-[#784610] border-[#c99a57]'
+                            }`}
+                          >
+                            {isFirst ? '👑' : `${idx + 1}`}
+                          </div>
+
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-pixel text-xs sm:text-sm font-bold truncate">
+                                {st.userName}
+                              </span>
+                              {st.isYou && (
+                                <span className="font-pixel text-[8px] bg-[#38bdf8] text-[#082f49] px-1 py-0.2 rounded-2xs font-bold shrink-0">
+                                  YOU
+                                </span>
+                              )}
+                            </div>
+                            <span
+                              className={`font-sans text-[11px] block font-medium ${
+                                st.isYou ? 'text-[#bae6fd]' : 'text-[#784610]'
+                              }`}
+                            >
+                              {st.outrightWins} Outright · {st.tiedWins} Tied
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="text-right shrink-0">
+                          <div
+                            className={`font-pixel text-xs sm:text-sm font-bold px-2 py-0.5 rounded-xs border inline-block ${
+                              isFirst
+                                ? 'bg-[#ca8a04] text-white border-[#854d0e]'
+                                : st.isYou
+                                ? 'bg-[#0284c7] text-white border-[#38bdf8]'
+                                : 'bg-[#ebd2a4] text-[#784610] border-[#c99a57]'
+                            }`}
+                          >
+                            {st.totalWins} {st.totalWins === 1 ? 'WIN' : 'WINS'}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* CARD B: TOTAL POINTS */}
+            <div className="pixel-box-cream p-3 rounded-xs w-full shadow-[0_3px_0_0_#c99a57] border-2 border-[#c99a57]">
+              <div className="flex items-center gap-2 pb-2 mb-2 border-b-2 border-[#d4a86a]">
+                <Trophy size={15} className="text-[#12579b]" />
+                <h2 className="font-pixel text-xs sm:text-sm text-[#5c3509] font-bold tracking-wider uppercase">
+                  POINTS & PPG
+                </h2>
+              </div>
+
+              <div className="space-y-1.5">
+                {pointsStandings.length === 0 ? (
+                  <div className="py-4 text-center font-sans text-xs text-[#784610]">
+                    No points scored yet.
+                  </div>
+                ) : (
+                  pointsStandings.map((st, idx) => {
+                    const isFirst = idx === 0 && st.totalPoints > 0;
+                    return (
+                      <div
+                        key={st.userName}
+                        className={`p-2 rounded-xs border-2 transition-all flex items-center justify-between gap-2 ${
+                          st.isYou
+                            ? 'bg-[#155e9e] text-[#fae5b8] border-[#38bdf8] shadow-xs'
+                            : isFirst
+                            ? 'bg-[#fef08a] text-[#713f12] border-[#ca8a04] shadow-xs'
+                            : 'bg-[#faebd0] text-[#5c3509] border-[#d4a86a]'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div
+                            className={`w-6 h-6 rounded-2xs flex items-center justify-center font-pixel text-[10px] font-bold shrink-0 border ${
+                              isFirst
+                                ? 'bg-[#ca8a04] text-white border-[#854d0e]'
+                                : st.isYou
+                                ? 'bg-[#0369a1] text-white border-[#38bdf8]'
+                                : 'bg-[#ebd2a4] text-[#784610] border-[#c99a57]'
+                            }`}
+                          >
+                            {isFirst ? '🏆' : `${idx + 1}`}
+                          </div>
+
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-pixel text-xs sm:text-sm font-bold truncate">
+                                {st.userName}
+                              </span>
+                              {st.isYou && (
+                                <span className="font-pixel text-[8px] bg-[#38bdf8] text-[#082f49] px-1 py-0.2 rounded-2xs font-bold shrink-0">
+                                  YOU
+                                </span>
+                              )}
+                            </div>
+                            <span
+                              className={`font-sans text-[11px] block font-medium ${
+                                st.isYou ? 'text-[#bae6fd]' : 'text-[#784610]'
+                              }`}
+                            >
+                              {st.avgPPG} PPG · {st.gamesPlayed} Games
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="text-right shrink-0">
+                          <div
+                            className={`font-pixel text-xs sm:text-sm font-bold px-2 py-0.5 rounded-xs border inline-block ${
+                              isFirst
+                                ? 'bg-[#ca8a04] text-white border-[#854d0e]'
+                                : st.isYou
+                                ? 'bg-[#0284c7] text-white border-[#38bdf8]'
+                                : 'bg-[#ebd2a4] text-[#784610] border-[#c99a57]'
+                            }`}
+                          >
+                            {st.totalPoints} PTS
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* 3. PODIUMS GRID */}
       <div className="pixel-box-cream p-3 sm:p-4 rounded-xs w-full shadow-[0_3px_0_0_#c99a57] border-2 border-[#c99a57] box-border">
         {/* Section Header & Filter Tabs */}
         <div className="flex flex-col sm:flex-row items-center justify-between pb-2.5 mb-3 border-b-2 border-[#d4a86a] gap-2">
@@ -863,6 +1104,8 @@ export const CentralLeagueLeaderboard: React.FC<CentralLeagueLeaderboardProps> =
           )}
         </div>
       </div>
+        </div>
+      )}
     </div>
   );
 };

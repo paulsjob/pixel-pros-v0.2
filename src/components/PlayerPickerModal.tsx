@@ -861,7 +861,7 @@ export const PlayerPickerModal: React.FC<PlayerPickerModalProps> = ({
                       }`}>
                         {scoringInfo.gameState === 'pre' ? (
                           <div className="flex items-center justify-center">
-                            <span className="font-pixel text-[11px] sm:text-xs font-bold text-[#5c3509] tracking-wider">
+                            <span className="font-sans text-xs font-semibold text-[#5c3509] tracking-tight">
                               {getPlayerPrimaryYardage(player, sport).toLocaleString()} {getPlayerYardageLabel(player, sport)}
                             </span>
                           </div>
@@ -873,7 +873,7 @@ export const PlayerPickerModal: React.FC<PlayerPickerModalProps> = ({
                             <span className="font-pixel text-[8px] text-white bg-[#b91c1c] px-1 py-0.5 rounded-2xs font-bold">
                               LIVE
                             </span>
-                            <span className="font-pixel text-[9px] text-[#784610] font-bold">
+                            <span className="font-sans text-[11px] font-medium text-[#784610]">
                               · {getPlayerPrimaryYardage(player, sport).toLocaleString()} {getPlayerYardageLabel(player, sport)}
                             </span>
                           </div>
@@ -885,7 +885,7 @@ export const PlayerPickerModal: React.FC<PlayerPickerModalProps> = ({
                             <span className="font-pixel text-[8px] text-[#93c5fd] bg-[#12579b] px-1 py-0.5 rounded-2xs font-bold">
                               FINAL
                             </span>
-                            <span className="font-pixel text-[9px] text-[#784610] font-bold">
+                            <span className="font-sans text-[11px] font-medium text-[#784610]">
                               · {getPlayerPrimaryYardage(player, sport).toLocaleString()} {getPlayerYardageLabel(player, sport)}
                             </span>
                           </div>

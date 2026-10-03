@@ -627,6 +627,15 @@ export async function syncESPNData(sport: SportId = 'nfl'): Promise<ESPNSyncResu
       }
       if (baseCompetitors.length === 0) {
         baseCompetitors = DEFAULT_NFL_COMPETITORS;
+      } else {
+        const existingAthleteIds = new Set(baseCompetitors.map((c) => String(c.athleteId || c.id).replace(/^nfl_/, '')));
+        for (const defC of DEFAULT_NFL_COMPETITORS) {
+          const rawId = String(defC.athleteId || defC.id).replace(/^nfl_/, '');
+          if (!existingAthleteIds.has(rawId)) {
+            baseCompetitors.push(defC);
+            existingAthleteIds.add(rawId);
+          }
+        }
       }
     } else {
       baseCompetitors = DEFAULT_NBA_COMPETITORS;

@@ -1705,51 +1705,83 @@ export function resolveCompetitorById(
 ): Competitor | null {
   if (!id) return null;
   const cleanId = String(id).trim();
-  if (!cleanId) return null;
+  if (!cleanId || cleanId === 'null' || cleanId === 'undefined') return null;
 
   // 1. Direct ID match in roster
   let match = (roster || []).find((p) => p && (p.id === cleanId || p.athleteId === cleanId || (p as any).athlete_id === cleanId));
   if (match) return match;
 
-  // 2. Normalized prefix match (without 'nfl_' / 'nba_' or with)
-  const rawId = cleanId.replace(/^(nfl_|nba_)/, '');
+  // 2. Normalized prefix match (without 'nfl_' / 'nba_' or with) in roster
+  const rawId = cleanId.replace(/^(nfl_|nba_)/i, '');
   match = (roster || []).find((p) => p && (
     p.id === rawId ||
     p.id === `${sport}_${rawId}` ||
+    p.id === `nfl_${rawId}` ||
+    p.id === `nba_${rawId}` ||
     p.athleteId === rawId ||
     (p as any).athlete_id === rawId
   ));
   if (match) return match;
 
-  // 3. Normalized name match
-  const normClean = cleanId.toLowerCase().replace(/[^a-z]/g, '');
-  match = (roster || []).find((p) => {
-    if (!p) return false;
-    const pName = (p.displayName || p.shortName || '').toLowerCase().replace(/[^a-z]/g, '');
-    return pName.length > 3 && (normClean.includes(pName) || pName.includes(normClean));
-  });
-  if (match) return match;
-
-  // 4. Fallback to previous player if IDs match
+  // 3. Fallback to previous player if IDs match
   if (fallbackPlayer) {
     if (fallbackPlayer.id === cleanId || fallbackPlayer.athleteId === cleanId || (fallbackPlayer as any).athlete_id === cleanId) {
       return fallbackPlayer;
     }
-    const prevRaw = (fallbackPlayer.id || '').replace(/^(nfl_|nba_)/, '');
+    const prevRaw = (fallbackPlayer.id || fallbackPlayer.athleteId || '').replace(/^(nfl_|nba_)/i, '');
     if (prevRaw === rawId) return fallbackPlayer;
   }
 
-  // 5. Fallback to default competitor roster pool
-  const defaultPool = DEFAULT_NFL_COMPETITORS;
-  match = defaultPool.find((p) => p && (
+  // 4. Fallback to default competitor roster pool (check BOTH primary and secondary defaults by ID)
+  const isNbaHint = sport === 'nba' || cleanId.toLowerCase().startsWith('nba_');
+  const primaryDefaults = isNbaHint ? DEFAULT_NBA_COMPETITORS : DEFAULT_NFL_COMPETITORS;
+  const secondaryDefaults = isNbaHint ? DEFAULT_NFL_COMPETITORS : DEFAULT_NBA_COMPETITORS;
+
+  match = primaryDefaults.find((p) => p && (
     p.id === cleanId ||
     p.athleteId === cleanId ||
+    p.athleteId === rawId ||
     p.id === `${sport}_${rawId}` ||
-    p.athleteId === rawId
+    p.id === `nfl_${rawId}` ||
+    p.id === `nba_${rawId}`
+  )) || secondaryDefaults.find((p) => p && (
+    p.id === cleanId ||
+    p.athleteId === cleanId ||
+    p.athleteId === rawId ||
+    p.id === `${sport}_${rawId}` ||
+    p.id === `nfl_${rawId}` ||
+    p.id === `nba_${rawId}`
   ));
   if (match) return match;
 
-  // 6. If fallback player exists, preserve it to prevent dropping to null
+  // 5. Look up in NFL_ROSTER_MANIFEST by raw athleteId if NFL
+  if (!isNbaHint) {
+    for (const teamAthletes of Object.values(NFL_ROSTER_MANIFEST)) {
+      const found = teamAthletes.find((a) => String(a.athleteId) === rawId);
+      if (found) {
+        const comp = DEFAULT_NFL_COMPETITORS.find((c) => c.athleteId === String(found.athleteId) || c.id === `nfl_${found.athleteId}`);
+        if (comp) return comp;
+      }
+    }
+  }
+
+  // 6. Normalized name match: ONLY if cleanId is NOT a numeric or prefixed-numeric ID!
+  // Prevents numeric IDs like 'nfl_4685512' from mistakenly matching players with 'nfl' in their names (e.g. Ryan Flournoy)!
+  const isNumericOrPrefixId = /^(nfl_|nba_)?\d+$/i.test(cleanId);
+  if (!isNumericOrPrefixId) {
+    const normClean = rawId.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (normClean.length >= 4 && normClean !== 'nfl' && normClean !== 'nba') {
+      const poolToCheck = [...(roster || []), ...primaryDefaults];
+      match = poolToCheck.find((p) => {
+        if (!p) return false;
+        const pName = (p.displayName || p.shortName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        return pName === normClean || (pName.length >= 4 && (pName.includes(normClean) || normClean.includes(pName)));
+      });
+      if (match) return match;
+    }
+  }
+
+  // 7. If fallback player exists, preserve it to prevent dropping to null
   if (fallbackPlayer && cleanId) {
     return fallbackPlayer;
   }

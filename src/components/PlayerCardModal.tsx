@@ -360,43 +360,43 @@ export const PlayerCardModal: React.FC<PlayerCardModalProps> = ({
                       <span className="text-[#12579b] font-bold">+{nbaRebPts} PTS</span>
                     </div>
 
-                    <div className="flex items-center justify-between py-0.5 px-1.5 bg-[#fae5b8] border border-[#d4a86a] rounded-xs font-pixel text-[10px]">
-                      <span className="font-bold text-[#5c3509]">⚡ {pts} PTS (1/3)</span>
+                    <div className="flex items-center justify-between py-1 px-2 bg-[#fae5b8] border border-[#d4a86a] rounded-xs font-sans text-xs">
+                      <span className="font-bold text-[#5c3509]">🏀 {pts} PTS (1/3)</span>
                       <span className="text-[#12579b] font-bold">+{nbaGamePts} PTS</span>
                     </div>
                   </>
                 ) : (
                   <>
                     {tds > 0 && (
-                      <div className="flex items-center justify-between py-0.5 px-1.5 bg-[#fae5b8] border border-[#d4a86a] rounded-xs font-pixel text-[10px]">
+                      <div className="flex items-center justify-between py-1 px-2 bg-[#fae5b8] border border-[#d4a86a] rounded-xs font-sans text-xs">
                         <span className="font-bold text-[#5c3509]">🏈 {tds} TOUCHDOWN{tds > 1 ? 'S' : ''}</span>
                         <span className="text-[#b45309] font-bold">+{tdPoints} PTS</span>
                       </div>
                     )}
 
                     {passYds > 0 && (
-                      <div className="flex items-center justify-between py-0.5 px-1.5 bg-[#fae5b8] border border-[#d4a86a] rounded-xs font-pixel text-[10px]">
+                      <div className="flex items-center justify-between py-1 px-2 bg-[#fae5b8] border border-[#d4a86a] rounded-xs font-sans text-xs">
                         <span className="font-bold text-[#5c3509]">⚡ {passYds} PASS YDS</span>
                         <span className="text-[#12579b] font-bold">+{passPoints} PTS</span>
                       </div>
                     )}
 
                     {rushYds > 0 && (
-                      <div className="flex items-center justify-between py-0.5 px-1.5 bg-[#fae5b8] border border-[#d4a86a] rounded-xs font-pixel text-[10px]">
+                      <div className="flex items-center justify-between py-1 px-2 bg-[#fae5b8] border border-[#d4a86a] rounded-xs font-sans text-xs">
                         <span className="font-bold text-[#5c3509]">🏃 {rushYds} RUSH YDS</span>
                         <span className="text-[#12579b] font-bold">+{rushPoints} PTS</span>
                       </div>
                     )}
 
                     {recYds > 0 && (
-                      <div className="flex items-center justify-between py-0.5 px-1.5 bg-[#fae5b8] border border-[#d4a86a] rounded-xs font-pixel text-[10px]">
+                      <div className="flex items-center justify-between py-1 px-2 bg-[#fae5b8] border border-[#d4a86a] rounded-xs font-sans text-xs">
                         <span className="font-bold text-[#5c3509]">🙌 {recYds} REC YDS</span>
                         <span className="text-[#12579b] font-bold">+{recPoints} PTS</span>
                       </div>
                     )}
 
                     {nflAdjustment !== 0 && (
-                      <div className="flex items-center justify-between py-0.5 px-1.5 bg-[#fae5b8] border border-[#d4a86a] rounded-xs font-pixel text-[10px]">
+                      <div className="flex items-center justify-between py-1 px-2 bg-[#fae5b8] border border-[#d4a86a] rounded-xs font-sans text-xs">
                         <span className="font-bold text-[#5c3509]">{nflAdjustment > 0 ? '🌟 BONUS' : '⚠️ ADJUSTMENT'}</span>
                         <span className={`font-bold ${nflAdjustment > 0 ? 'text-[#15803d]' : 'text-[#b91c1c]'}`}>
                           {nflAdjustment > 0 ? `+${nflAdjustment}` : `${nflAdjustment}`} PTS
@@ -427,14 +427,14 @@ export const PlayerCardModal: React.FC<PlayerCardModalProps> = ({
                   <span>LAST GAME PERFORMANCE</span>
                 </span>
                 {typeof lastGameRecapData.score === 'number' && lastGameRecapData.score > 0 && (
-                  <span className="font-pixel text-[9px] text-[#0f172a] bg-[#e2e8f0] px-1.5 py-0.5 rounded-2xs border border-[#cbd5e1] font-bold">
+                  <span className="font-sans text-xs text-[#0f172a] bg-[#e2e8f0] px-2 py-0.5 rounded-2xs border border-[#cbd5e1] font-bold">
                     {lastGameRecapData.score} PTS
                   </span>
                 )}
               </div>
-              <div className="font-retro text-xs text-[#334155] flex items-center justify-between px-1">
+              <div className="font-sans text-xs text-[#334155] flex items-center justify-between px-1">
                 <span>Recent Recap:</span>
-                <span className="font-pixel text-[10px] text-[#0f172a] font-bold">{lastGameRecapData.recap}</span>
+                <span className="font-sans text-xs text-[#0f172a] font-bold">{lastGameRecapData.recap}</span>
               </div>
             </div>
 
@@ -446,26 +446,26 @@ export const PlayerCardModal: React.FC<PlayerCardModalProps> = ({
                     <Trophy size={11} className="text-[#b45309]" />
                     <span>2026 SEASON TOTALS</span>
                   </span>
-                  <span className="font-pixel text-[8px] text-[#784610] bg-[#fae5b8] px-1.5 py-0.5 rounded-2xs border border-[#d4a86a] font-bold">
+                  <span className="font-sans text-[10px] text-[#784610] bg-[#fae5b8] px-1.5 py-0.5 rounded-2xs border border-[#d4a86a] font-bold">
                     OFFICIAL ESPN
                   </span>
                 </div>
-                <div className="grid grid-cols-4 gap-1 text-center font-retro">
+                <div className="grid grid-cols-4 gap-1 text-center">
                   <div className="p-1 bg-[#fff8eb] border border-[#e2ba7d] rounded-xs">
-                    <span className="block font-pixel text-[8px] text-[#784610]">PASS YDS</span>
-                    <span className="font-pixel text-xs text-[#5c3509] font-bold">{seasonPass.toLocaleString()}</span>
+                    <span className="block font-sans text-[10px] text-[#784610] font-bold">PASS YDS</span>
+                    <span className="font-sans text-xs sm:text-sm text-[#5c3509] font-bold">{seasonPass.toLocaleString()}</span>
                   </div>
                   <div className="p-1 bg-[#fff8eb] border border-[#e2ba7d] rounded-xs">
-                    <span className="block font-pixel text-[8px] text-[#784610]">RUSH YDS</span>
-                    <span className="font-pixel text-xs text-[#5c3509] font-bold">{seasonRush.toLocaleString()}</span>
+                    <span className="block font-sans text-[10px] text-[#784610] font-bold">RUSH YDS</span>
+                    <span className="font-sans text-xs sm:text-sm text-[#5c3509] font-bold">{seasonRush.toLocaleString()}</span>
                   </div>
                   <div className="p-1 bg-[#fff8eb] border border-[#e2ba7d] rounded-xs">
-                    <span className="block font-pixel text-[8px] text-[#784610]">REC YDS</span>
-                    <span className="font-pixel text-xs text-[#5c3509] font-bold">{seasonRec.toLocaleString()}</span>
+                    <span className="block font-sans text-[10px] text-[#784610] font-bold">REC YDS</span>
+                    <span className="font-sans text-xs sm:text-sm text-[#5c3509] font-bold">{seasonRec.toLocaleString()}</span>
                   </div>
                   <div className="p-1 bg-[#fff8eb] border border-[#e2ba7d] rounded-xs">
-                    <span className="block font-pixel text-[8px] text-[#784610]">TDS</span>
-                    <span className="font-pixel text-xs text-[#b45309] font-bold">{seasonTds}</span>
+                    <span className="block font-sans text-[10px] text-[#784610] font-bold">TDS</span>
+                    <span className="font-sans text-xs sm:text-sm text-[#b45309] font-bold">{seasonTds}</span>
                   </div>
                 </div>
               </div>
@@ -476,7 +476,7 @@ export const PlayerCardModal: React.FC<PlayerCardModalProps> = ({
         {/* Actions: Always visible at bottom without scrolling */}
         <div className="mt-2.5 shrink-0 space-y-1">
           {isLocked ? (
-            <div className="w-full py-2 px-3 bg-[#064e3b] text-[#fde047] border-2 border-[#047857] shadow-xs font-pixel text-[10px] sm:text-xs rounded-xs text-center flex items-center justify-center gap-1.5 font-bold select-none">
+            <div className="w-full py-2 px-3 bg-[#1e293b] text-[#cbd5e1] border-2 border-[#334155] shadow-xs font-pixel text-[10px] sm:text-xs rounded-xs text-center flex items-center justify-center gap-1.5 font-bold select-none">
               <span>🔒</span>
               <span>SQUAD IS LOCKED (READ-ONLY)</span>
             </div>

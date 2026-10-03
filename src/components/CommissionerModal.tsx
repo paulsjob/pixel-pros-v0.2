@@ -844,7 +844,7 @@ export const CommissionerModal: React.FC<CommissionerModalProps> = ({
                         type="text"
                         value={roomSearchFilter}
                         onChange={(e) => setRoomSearchFilter(e.target.value)}
-                        placeholder="Search room code or squad name..."
+                        placeholder="Search couch code or squad name..."
                         className="w-full pl-9 pr-8 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
                       />
                       {roomSearchFilter && (
@@ -1007,7 +1007,7 @@ export const CommissionerModal: React.FC<CommissionerModalProps> = ({
                   {/* Rooms Table */}
                   <div className="border border-slate-800 rounded-lg overflow-hidden bg-slate-900/30">
                     <div className="hidden md:grid grid-cols-12 gap-2 px-4 py-2.5 bg-slate-900/90 border-b border-slate-800 text-[11px] font-bold uppercase tracking-wider text-slate-300">
-                      <div className="col-span-3 lg:col-span-2">Room Code</div>
+                      <div className="col-span-3 lg:col-span-2">Couch Code</div>
                       <div className="col-span-1">Sport</div>
                       <div className="col-span-3 lg:col-span-2">Squads & Slates</div>
                       <div className="col-span-1 lg:col-span-2">Lock Status</div>
@@ -2231,7 +2231,7 @@ export const CommissionerModal: React.FC<CommissionerModalProps> = ({
 
               <form onSubmit={handleCreateNewRoom} className="space-y-3">
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1 font-medium">Room Code</label>
+                  <label className="block text-xs text-slate-400 mb-1 font-medium">Couch Code</label>
                   <input
                     type="text"
                     value={newRoomCode}

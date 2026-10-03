@@ -16,7 +16,7 @@ export interface DynamicDepthChartResult {
 export interface DynamicAthleteRecord {
   id: string;
   name: string;
-  position: 'QB' | 'RB' | 'WR' | 'TE';
+  position: 'QB' | 'RB' | 'WR' | 'TE' | 'K';
   team: string;
   sport: 'nfl';
   score: number;
@@ -209,11 +209,15 @@ export async function runPureDynamicDepthChartSync(
       const teamColors = getTeamColors(teamAbbr);
       const teamFullName = getTeamFullName(teamAbbr);
 
-      const addAthlete = (athlete: any, positionAbbr: 'QB' | 'RB' | 'WR' | 'TE', explicitRank?: number) => {
+      const teamAddedAthleteIds = new Set<string>();
+
+      const addAthlete = (athlete: any, positionAbbr: 'QB' | 'RB' | 'WR' | 'TE' | 'K', explicitRank?: number) => {
         if (!athlete || !athlete.id) return;
+        const athleteId = String(athlete.id);
+        if (teamAddedAthleteIds.has(athleteId)) return;
         const name = athlete.displayName || `${teamAbbr} ${positionAbbr}`;
         if (isRetiredPlayer(name)) return;
-        const athleteId = String(athlete.id);
+        teamAddedAthleteIds.add(athleteId);
         const rawJersey = jerseyMap.get(athleteId) || athlete.jersey || '';
         const uniformNumber = parseInt(rawJersey, 10) || 10;
         const shortName = (
@@ -361,27 +365,26 @@ export async function runPureDynamicDepthChartSync(
         teCount++;
       });
 
-      // 5. Manifest Supplementation: Guarantee every team reaches 3 QBs, 3 RBs, and 6 WR/TE (4 WR + 2 TE)
+      // 5. Manifest Guarantee: Ensure every canonical athlete in NFL_ROSTER_MANIFEST is present
       const manifestTeam = NFL_ROSTER_MANIFEST[teamAbbr] || [];
-      if (qbCount < 3) {
-        manifestTeam.filter((m) => m.position === 'QB').slice(qbCount, 3).forEach((m) => {
-          addAthlete({ id: m.athleteId, displayName: m.displayName, shortName: m.shortName, jersey: m.uniformNumber }, 'QB');
-        });
-      }
-      if (rbCount < 3) {
-        manifestTeam.filter((m) => m.position === 'RB').slice(rbCount, 3).forEach((m) => {
-          addAthlete({ id: m.athleteId, displayName: m.displayName, shortName: m.shortName, jersey: m.uniformNumber }, 'RB');
-        });
-      }
-      if (wrCount < 4) {
-        manifestTeam.filter((m) => m.position === 'WR').slice(wrCount, 4).forEach((m) => {
-          addAthlete({ id: m.athleteId, displayName: m.displayName, shortName: m.shortName, jersey: m.uniformNumber }, 'WR');
-        });
-      }
-      if (teCount < 2) {
-        manifestTeam.filter((m) => m.position === 'TE').slice(teCount, 2).forEach((m) => {
-          addAthlete({ id: m.athleteId, displayName: m.displayName, shortName: m.shortName, jersey: m.uniformNumber }, 'TE');
-        });
+      for (const m of manifestTeam) {
+        const athId = String(m.athleteId);
+        if (!teamAddedAthleteIds.has(athId)) {
+          addAthlete(
+            {
+              id: m.athleteId,
+              displayName: m.displayName,
+              shortName: m.shortName,
+              jersey: m.uniformNumber,
+              depthRank: m.depthRank,
+              depthOrder: m.depthOrder,
+              injuryStatus: m.injuryStatus,
+              injuryDetail: m.injuryDetail,
+            },
+            m.position,
+            m.depthRank
+          );
+        }
       }
     }
 

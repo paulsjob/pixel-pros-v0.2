@@ -26,12 +26,27 @@ body, html, #root {
 
 /* Retro arcade styles for gameplay components */
 .font-pixel,
-.font-retro,
 .pixel-box-cream,
 .pixel-box-blue,
 .pixel-box-dark,
 .pixel-button {
   font-family: 'Press Start 2P', monospace;
+}
+
+.font-retro {
+  font-family: 'VT323', monospace;
+  letter-spacing: 0.5px;
+}
+
+/* Accessible, clean, high-contrast readable font for secondary data, game logs, stats, and tables */
+.font-sans,
+.font-stats,
+.font-readable,
+.font-data,
+.font-body {
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+  letter-spacing: normal !important;
+  image-rendering: auto !important;
 }
 
 .font-number {

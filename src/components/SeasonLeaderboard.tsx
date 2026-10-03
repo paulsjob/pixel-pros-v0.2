@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Competitor, Match, SportId, UserRoster } from '../types';
-import { Trophy, Crown, Calendar, Sparkles, ChevronRight, CheckCircle2 } from 'lucide-react';
+import { Trophy, Crown, Calendar, Sparkles, ChevronRight, CheckCircle2, BarChart2 } from 'lucide-react';
 import {
   parseLeagueIdentity,
   resolveCompetitorById,
@@ -60,6 +60,7 @@ export const SeasonLeaderboard: React.FC<SeasonLeaderboardProps> = ({
 
   const [allLeagueRosters, setAllLeagueRosters] = useState<UserRoster[]>(roomRosters);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [showAdvancedStats, setShowAdvancedStats] = useState<boolean>(false);
 
   // Fetch all historical rosters for this entire league franchise across all weeks
   useEffect(() => {
@@ -391,8 +392,8 @@ export const SeasonLeaderboard: React.FC<SeasonLeaderboardProps> = ({
             <h1 className="font-pixel text-xs sm:text-sm text-white font-bold tracking-wider uppercase">
               SEASON RUNNING LEADERBOARD
             </h1>
-            <span className="font-retro text-[11px] text-[#93c5fd] block -mt-0.5">
-              LEAGUE: {baseLeague} · {distinctWeeks.length} WEEKS TRACKED
+            <span className="font-sans text-xs text-[#93c5fd] block -mt-0.5">
+              COUCH: {baseLeague} · {distinctWeeks.length} WEEKS TRACKED
             </span>
           </div>
         </div>
@@ -402,58 +403,86 @@ export const SeasonLeaderboard: React.FC<SeasonLeaderboardProps> = ({
             <span className="font-pixel text-[10px] sm:text-xs text-[#fde047] font-bold block">
               👑 {seasonChampion.userName}
             </span>
-            <span className="font-retro text-[10px] text-[#cbd5e1] block">
+            <span className="font-sans text-[11px] text-[#cbd5e1] block">
               {seasonChampion.totalSeasonWins} WINS · {seasonChampion.totalSeasonPoints} PTS
             </span>
           </div>
         )}
       </div>
 
-      {/* 2. THE TWO MASTER SEASON STANDINGS CARDS */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full box-border">
-        {/* CARD A: MOST SEASON WINS */}
-        <div className="pixel-box-cream p-3 rounded-xs w-full shadow-[0_3px_0_0_#c99a57] border-2 border-[#c99a57]">
-          <div className="flex items-center gap-2 pb-2 mb-2 border-b-2 border-[#d4a86a]">
-            <Crown size={15} className="text-[#ca8a04]" />
+      {/* 2. UNIFIED DEFAULT VIEW: MARIO KART SEASON STANDINGS (ORDERED BY TOTAL POINTS) */}
+      <div className="pixel-box-cream p-3 sm:p-4 rounded-xs w-full shadow-[0_3px_0_0_#c99a57] border-2 border-[#c99a57] box-border">
+        <div className="flex items-center justify-between pb-2 mb-3 border-b-2 border-[#d4a86a] gap-2 flex-wrap">
+          <div className="flex items-center gap-2">
+            <Trophy size={18} className="text-[#ca8a04]" />
             <h2 className="font-pixel text-xs sm:text-sm text-[#5c3509] font-bold tracking-wider uppercase">
-              MOST SEASON WINS
+              OVERALL COUCH SEASON STANDINGS
             </h2>
           </div>
+          <button
+            type="button"
+            onClick={() => setShowAdvancedStats((v) => !v)}
+            className={`touch-manipulation px-2.5 py-1 rounded-xs font-pixel text-[9px] sm:text-[10px] border-2 cursor-pointer transition-all flex items-center gap-1.5 font-bold shadow-xs active:translate-y-0.5 ${
+              showAdvancedStats
+                ? 'bg-[#12579b] text-[#fae5b8] border-[#0a2d52]'
+                : 'bg-[#ebd2a4] hover:bg-[#fae5b8] text-[#5c3509] border-[#c99a57]'
+            }`}
+            title="Toggle advanced statistical breakdown"
+          >
+            <BarChart2 size={12} className={showAdvancedStats ? 'text-[#38bdf8]' : 'text-[#784610]'} />
+            <span>{showAdvancedStats ? '🤓 NERD STATS: ON' : '🤓 NERD STATS: OFF'}</span>
+          </button>
+        </div>
 
-          <div className="space-y-1.5">
-            {seasonStatsList.length === 0 ? (
-              <div className="py-4 text-center font-retro text-xs text-[#784610]">
-                No season picks recorded yet.
-              </div>
-            ) : (
-              seasonStatsList.map((st, idx) => {
-                const isFirst = idx === 0 && st.totalSeasonWins > 0;
+        <div className="space-y-2">
+          {seasonStatsList.length === 0 ? (
+            <div className="py-6 text-center font-sans text-xs text-[#784610]">
+              No points scored yet this season.
+            </div>
+          ) : (
+            [...seasonStatsList]
+              .sort((a, b) => b.totalSeasonPoints - a.totalSeasonPoints)
+              .map((st, idx) => {
+                const isFirst = idx === 0 && st.totalSeasonPoints > 0;
+                const isSecond = idx === 1 && st.totalSeasonPoints > 0;
+                const isThird = idx === 2 && st.totalSeasonPoints > 0;
+                const topScore = [...seasonStatsList].sort((a, b) => b.totalSeasonPoints - a.totalSeasonPoints)[0]?.totalSeasonPoints || 0;
+                const gap = Math.max(0, topScore - st.totalSeasonPoints);
+
                 return (
                   <div
                     key={st.userName}
-                    className={`p-2 rounded-xs border-2 transition-all flex items-center justify-between gap-2 ${
+                    className={`p-2.5 sm:p-3 rounded-xs border-2 transition-all flex items-center justify-between gap-3 ${
                       st.isYou
                         ? 'bg-[#155e9e] text-[#fae5b8] border-[#38bdf8] shadow-xs'
                         : isFirst
-                        ? 'bg-[#fef08a] text-[#713f12] border-[#ca8a04] shadow-xs'
+                        ? 'bg-[#fef08a] text-[#713f12] border-[#ca8a04] shadow-xs ring-1 ring-[#fde047]'
+                        : isSecond
+                        ? 'bg-[#f1f5f9] text-[#1e293b] border-[#cbd5e1] shadow-xs'
+                        : isThird
+                        ? 'bg-[#ffedd5] text-[#7c2d12] border-[#fdba74] shadow-xs'
                         : 'bg-[#faebd0] text-[#5c3509] border-[#d4a86a]'
                     }`}
                   >
-                    <div className="flex items-center gap-2 min-w-0">
+                    <div className="flex items-center gap-2.5 min-w-0">
                       <div
-                        className={`w-6 h-6 rounded-2xs flex items-center justify-center font-pixel text-[10px] font-bold shrink-0 border ${
+                        className={`w-7 h-7 sm:w-8 sm:h-8 rounded-2xs flex items-center justify-center font-pixel text-xs sm:text-sm font-bold shrink-0 border ${
                           isFirst
-                            ? 'bg-[#ca8a04] text-white border-[#854d0e]'
+                            ? 'bg-[#ca8a04] text-white border-[#854d0e] shadow-xs'
+                            : isSecond
+                            ? 'bg-[#94a3b8] text-white border-[#64748b] shadow-xs'
+                            : isThird
+                            ? 'bg-[#b45309] text-white border-[#78350f] shadow-xs'
                             : st.isYou
                             ? 'bg-[#0369a1] text-white border-[#38bdf8]'
                             : 'bg-[#ebd2a4] text-[#784610] border-[#c99a57]'
                         }`}
                       >
-                        {isFirst ? '👑' : `${idx + 1}`}
+                        {isFirst ? '🥇' : isSecond ? '🥈' : isThird ? '🥉' : `${idx + 1}`}
                       </div>
 
                       <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="font-pixel text-xs sm:text-sm font-bold truncate">
                             {st.userName}
                           </span>
@@ -462,21 +491,23 @@ export const SeasonLeaderboard: React.FC<SeasonLeaderboardProps> = ({
                               YOU
                             </span>
                           )}
+                          {isFirst && (
+                            <span className="text-xs select-none">👑</span>
+                          )}
                         </div>
-                        <span
-                          className={`font-retro text-[11px] block ${
-                            st.isYou ? 'text-[#bae6fd]' : 'text-[#784610]'
-                          }`}
-                        >
-                          {st.weeklyTitlesWon > 0 ? `${st.weeklyTitlesWon}x Week Champ 🏆 · ` : ''}
-                          {st.outrightWins} Outright · {st.tiedWins} Tied
-                        </span>
+                        <div className="font-sans text-[11px] sm:text-xs font-medium truncate mt-0.5 opacity-90">
+                          {isFirst
+                            ? '🏆 Leading the Couch Season!'
+                            : gap > 0
+                            ? `${gap} pts behind 1st place`
+                            : 'Tied for 1st place!'}
+                        </div>
                       </div>
                     </div>
 
                     <div className="text-right shrink-0">
                       <div
-                        className={`font-pixel text-xs sm:text-sm font-bold px-2 py-0.5 rounded-xs border inline-block ${
+                        className={`font-pixel text-xs sm:text-sm font-bold px-2.5 py-1 rounded-xs border inline-block ${
                           isFirst
                             ? 'bg-[#ca8a04] text-white border-[#854d0e]'
                             : st.isYou
@@ -484,100 +515,194 @@ export const SeasonLeaderboard: React.FC<SeasonLeaderboardProps> = ({
                             : 'bg-[#ebd2a4] text-[#784610] border-[#c99a57]'
                         }`}
                       >
-                        {st.totalSeasonWins} WINS
+                        {st.totalSeasonPoints} PTS
                       </div>
                     </div>
                   </div>
                 );
               })
-            )}
-          </div>
-        </div>
-
-        {/* CARD B: TOTAL SEASON POINTS */}
-        <div className="pixel-box-cream p-3 rounded-xs w-full shadow-[0_3px_0_0_#c99a57] border-2 border-[#c99a57]">
-          <div className="flex items-center gap-2 pb-2 mb-2 border-b-2 border-[#d4a86a]">
-            <Trophy size={15} className="text-[#12579b]" />
-            <h2 className="font-pixel text-xs sm:text-sm text-[#5c3509] font-bold tracking-wider uppercase">
-              TOTAL SEASON POINTS
-            </h2>
-          </div>
-
-          <div className="space-y-1.5">
-            {seasonStatsList.length === 0 ? (
-              <div className="py-4 text-center font-retro text-xs text-[#784610]">
-                No points scored yet.
-              </div>
-            ) : (
-              [...seasonStatsList]
-                .sort((a, b) => b.totalSeasonPoints - a.totalSeasonPoints)
-                .map((st, idx) => {
-                  const isFirst = idx === 0 && st.totalSeasonPoints > 0;
-                  return (
-                    <div
-                      key={st.userName}
-                      className={`p-2 rounded-xs border-2 transition-all flex items-center justify-between gap-2 ${
-                        st.isYou
-                          ? 'bg-[#155e9e] text-[#fae5b8] border-[#38bdf8] shadow-xs'
-                          : isFirst
-                          ? 'bg-[#fef08a] text-[#713f12] border-[#ca8a04] shadow-xs'
-                          : 'bg-[#faebd0] text-[#5c3509] border-[#d4a86a]'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <div
-                          className={`w-6 h-6 rounded-2xs flex items-center justify-center font-pixel text-[10px] font-bold shrink-0 border ${
-                            isFirst
-                              ? 'bg-[#ca8a04] text-white border-[#854d0e]'
-                              : st.isYou
-                              ? 'bg-[#0369a1] text-white border-[#38bdf8]'
-                              : 'bg-[#ebd2a4] text-[#784610] border-[#c99a57]'
-                          }`}
-                        >
-                          {isFirst ? '🏆' : `${idx + 1}`}
-                        </div>
-
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-pixel text-xs sm:text-sm font-bold truncate">
-                              {st.userName}
-                            </span>
-                            {st.isYou && (
-                              <span className="font-pixel text-[8px] bg-[#38bdf8] text-[#082f49] px-1 py-0.2 rounded-2xs font-bold shrink-0">
-                                YOU
-                              </span>
-                            )}
-                          </div>
-                          <span
-                            className={`font-retro text-[11px] block ${
-                              st.isYou ? 'text-[#bae6fd]' : 'text-[#784610]'
-                            }`}
-                          >
-                            {st.seasonAvgPPG} PPG · {st.totalGamesPlayed} Games
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="text-right shrink-0">
-                        <div
-                          className={`font-pixel text-xs sm:text-sm font-bold px-2 py-0.5 rounded-xs border inline-block ${
-                            isFirst
-                              ? 'bg-[#ca8a04] text-white border-[#854d0e]'
-                              : st.isYou
-                              ? 'bg-[#0284c7] text-white border-[#38bdf8]'
-                              : 'bg-[#ebd2a4] text-[#784610] border-[#c99a57]'
-                          }`}
-                        >
-                          {st.totalSeasonPoints} PTS
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })
-            )}
-          </div>
+          )}
         </div>
       </div>
+
+      {/* 3. PROGRESSIVE DISCLOSURE: NERD STATS (MOST WINS & WEEKLY MATRIX) */}
+      {showAdvancedStats && (
+        <div className="space-y-3.5 border-t-2 border-[#d4a86a] pt-3 animate-in fade-in duration-150">
+          <div className="flex items-center gap-2 px-1">
+            <BarChart2 size={16} className="text-[#38bdf8]" />
+            <h3 className="font-pixel text-xs text-[#fae5b8] font-bold tracking-wider uppercase">
+              📊 ADVANCED SEASON BREAKDOWN & STATS
+            </h3>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full box-border">
+            {/* CARD A: MOST SEASON WINS */}
+            <div className="pixel-box-cream p-3 rounded-xs w-full shadow-[0_3px_0_0_#c99a57] border-2 border-[#c99a57]">
+              <div className="flex items-center gap-2 pb-2 mb-2 border-b-2 border-[#d4a86a]">
+                <Crown size={15} className="text-[#ca8a04]" />
+                <h2 className="font-pixel text-xs sm:text-sm text-[#5c3509] font-bold tracking-wider uppercase">
+                  MOST SEASON WINS
+                </h2>
+              </div>
+
+              <div className="space-y-1.5">
+                {seasonStatsList.length === 0 ? (
+                  <div className="py-4 text-center font-sans text-xs text-[#784610]">
+                    No season picks recorded yet.
+                  </div>
+                ) : (
+                  seasonStatsList.map((st, idx) => {
+                    const isFirst = idx === 0 && st.totalSeasonWins > 0;
+                    return (
+                      <div
+                        key={st.userName}
+                        className={`p-2 rounded-xs border-2 transition-all flex items-center justify-between gap-2 ${
+                          st.isYou
+                            ? 'bg-[#155e9e] text-[#fae5b8] border-[#38bdf8] shadow-xs'
+                            : isFirst
+                            ? 'bg-[#fef08a] text-[#713f12] border-[#ca8a04] shadow-xs'
+                            : 'bg-[#faebd0] text-[#5c3509] border-[#d4a86a]'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div
+                            className={`w-6 h-6 rounded-2xs flex items-center justify-center font-pixel text-[10px] font-bold shrink-0 border ${
+                              isFirst
+                                ? 'bg-[#ca8a04] text-white border-[#854d0e]'
+                                : st.isYou
+                                ? 'bg-[#0369a1] text-white border-[#38bdf8]'
+                                : 'bg-[#ebd2a4] text-[#784610] border-[#c99a57]'
+                            }`}
+                          >
+                            {isFirst ? '👑' : `${idx + 1}`}
+                          </div>
+
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-pixel text-xs sm:text-sm font-bold truncate">
+                                {st.userName}
+                              </span>
+                              {st.isYou && (
+                                <span className="font-pixel text-[8px] bg-[#38bdf8] text-[#082f49] px-1 py-0.2 rounded-2xs font-bold shrink-0">
+                                  YOU
+                                </span>
+                              )}
+                            </div>
+                            <span
+                              className={`font-sans text-[11px] block font-medium ${
+                                st.isYou ? 'text-[#bae6fd]' : 'text-[#784610]'
+                              }`}
+                            >
+                              {st.weeklyTitlesWon > 0 ? `${st.weeklyTitlesWon}x Champ · ` : ''}
+                              {st.outrightWins} Outright · {st.tiedWins} Tied
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="text-right shrink-0">
+                          <div
+                            className={`font-pixel text-xs sm:text-sm font-bold px-2 py-0.5 rounded-xs border inline-block ${
+                              isFirst
+                                ? 'bg-[#ca8a04] text-white border-[#854d0e]'
+                                : st.isYou
+                                ? 'bg-[#0284c7] text-white border-[#38bdf8]'
+                                : 'bg-[#ebd2a4] text-[#784610] border-[#c99a57]'
+                            }`}
+                          >
+                            {st.totalSeasonWins} WINS
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* CARD B: PPG & GAMES PLAYED */}
+            <div className="pixel-box-cream p-3 rounded-xs w-full shadow-[0_3px_0_0_#c99a57] border-2 border-[#c99a57]">
+              <div className="flex items-center gap-2 pb-2 mb-2 border-b-2 border-[#d4a86a]">
+                <Trophy size={15} className="text-[#12579b]" />
+                <h2 className="font-pixel text-xs sm:text-sm text-[#5c3509] font-bold tracking-wider uppercase">
+                  SEASON PPG & GAMES
+                </h2>
+              </div>
+
+              <div className="space-y-1.5">
+                {seasonStatsList.length === 0 ? (
+                  <div className="py-4 text-center font-sans text-xs text-[#784610]">
+                    No points scored yet.
+                  </div>
+                ) : (
+                  [...seasonStatsList]
+                    .sort((a, b) => b.seasonAvgPPG - a.seasonAvgPPG)
+                    .map((st, idx) => {
+                      const isFirst = idx === 0 && st.seasonAvgPPG > 0;
+                      return (
+                        <div
+                          key={st.userName}
+                          className={`p-2 rounded-xs border-2 transition-all flex items-center justify-between gap-2 ${
+                            st.isYou
+                              ? 'bg-[#155e9e] text-[#fae5b8] border-[#38bdf8] shadow-xs'
+                              : isFirst
+                              ? 'bg-[#fef08a] text-[#713f12] border-[#ca8a04] shadow-xs'
+                              : 'bg-[#faebd0] text-[#5c3509] border-[#d4a86a]'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div
+                              className={`w-6 h-6 rounded-2xs flex items-center justify-center font-pixel text-[10px] font-bold shrink-0 border ${
+                                isFirst
+                                  ? 'bg-[#ca8a04] text-white border-[#854d0e]'
+                                  : st.isYou
+                                  ? 'bg-[#0369a1] text-white border-[#38bdf8]'
+                                  : 'bg-[#ebd2a4] text-[#784610] border-[#c99a57]'
+                              }`}
+                            >
+                              {isFirst ? '🏆' : `${idx + 1}`}
+                            </div>
+
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-pixel text-xs sm:text-sm font-bold truncate">
+                                  {st.userName}
+                                </span>
+                                {st.isYou && (
+                                  <span className="font-pixel text-[8px] bg-[#38bdf8] text-[#082f49] px-1 py-0.2 rounded-2xs font-bold shrink-0">
+                                    YOU
+                                  </span>
+                                )}
+                              </div>
+                              <span
+                                className={`font-sans text-[11px] block font-medium ${
+                                  st.isYou ? 'text-[#bae6fd]' : 'text-[#784610]'
+                                }`}
+                              >
+                                {st.totalGamesPlayed} Games Played
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="text-right shrink-0">
+                            <div
+                              className={`font-pixel text-xs sm:text-sm font-bold px-2 py-0.5 rounded-xs border inline-block ${
+                                isFirst
+                                  ? 'bg-[#ca8a04] text-white border-[#854d0e]'
+                                  : st.isYou
+                                  ? 'bg-[#0284c7] text-white border-[#38bdf8]'
+                                  : 'bg-[#ebd2a4] text-[#784610] border-[#c99a57]'
+                              }`}
+                            >
+                              {st.seasonAvgPPG} PPG
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                )}
+              </div>
+            </div>
+          </div>
 
       {/* 3. WEEK-BY-WEEK RUNNING TOTAL MATRIX */}
       <div className="pixel-box-cream p-3 sm:p-4 rounded-xs w-full shadow-[0_3px_0_0_#c99a57] border-2 border-[#c99a57] box-border overflow-hidden">
@@ -683,6 +808,8 @@ export const SeasonLeaderboard: React.FC<SeasonLeaderboardProps> = ({
           </table>
         </div>
       </div>
+        </div>
+      )}
     </div>
   );
 };
