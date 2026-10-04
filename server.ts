@@ -47,6 +47,8 @@ interface ServerDB {
   rosters: StoredRoster[];
   locks: Record<string, boolean>; // key: `${room}_${user}_${sport}`
   rooms?: Record<string, { sport: 'nfl' | 'nba'; createdAt: string; isArchived?: boolean; archivedAt?: string | null }>;
+  lastRescanTimestamp?: string;
+  lastRescanWeek?: number;
 }
 
 function ensureDataDir(): void {
@@ -70,6 +72,8 @@ function loadDatabase(): ServerDB {
           rosters: parsed.rosters,
           locks: parsed.locks || {},
           rooms: parsed.rooms || {},
+          lastRescanTimestamp: parsed.lastRescanTimestamp || new Date().toISOString(),
+          lastRescanWeek: parsed.lastRescanWeek || 4,
         };
       }
     } catch (err) {
@@ -117,7 +121,14 @@ async function syncWithSupabase(roomCodeFilter?: string) {
       query = query.or(`room_code.eq.${cleanFilter},room_code.like.${cleanFilter}__%`);
     }
     const { data, error } = await query;
-    if (error || !data || !Array.isArray(data)) return;
+    if (error) {
+      if (String(error.message || '').includes('restricted') || String(error.message || '').includes('quota')) {
+        console.warn('Server Supabase quota restricted, relying on local persistent DB.');
+        serverSupabase = null;
+      }
+      return;
+    }
+    if (!data || !Array.isArray(data)) return;
 
     let hasChanges = false;
     data.forEach((row: any) => {
@@ -772,6 +783,11 @@ async function clearAllNFLWeekPicksServer(pastWeekNumber: number = 3): Promise<{
 
 // 9b. Clear all week picks endpoint (for week turnover or manual commissioner action)
 app.post('/api/rosters/clear-week-picks', async (req: Request, res: Response) => {
+  const isConfirmed = req.body?.confirm === true || req.body?.confirm_clear === true;
+  if (!isConfirmed) {
+    res.status(403).json({ success: false, error: 'Explicit confirm required to clear weekly picks' });
+    return;
+  }
   const sport = (req.body?.sport || 'nfl').toString().toLowerCase();
   if (sport === 'nfl') {
     const stats = await clearAllNFLWeekPicksServer();
@@ -1290,8 +1306,8 @@ interface WeeklyRescanState {
 }
 
 let weeklyRescanState: WeeklyRescanState = {
-  lastRescanTimestamp: '',
-  lastRescanWeek: getCalendarNFLWeekServer(),
+  lastRescanTimestamp: dbState.lastRescanTimestamp || new Date().toISOString(),
+  lastRescanWeek: dbState.lastRescanWeek || getCalendarNFLWeekServer(),
   inProgress: false,
 };
 
@@ -1300,7 +1316,7 @@ async function executeWeeklyTuesdayRescan(isForced = false, targetWeekOverride?:
     return { success: false, week: weeklyRescanState.lastRescanWeek, message: 'Rescan already in progress' };
   }
   weeklyRescanState.inProgress = true;
-  console.log(`[Weekly Rescan] Initiating Tuesday 4:00 AM EST full data rescan (forced: ${isForced}, override: ${targetWeekOverride})...`);
+  console.log(`[Weekly Rescan] Initiating Tuesday 4:00 AM EST data sync (forced: ${isForced}, override: ${targetWeekOverride})...`);
 
   try {
     // 1. Fetch fresh scoreboard from ESPN to determine the new week or use manual override
@@ -1326,46 +1342,36 @@ async function executeWeeklyTuesdayRescan(isForced = false, targetWeekOverride?:
     // 2. Sync games to Supabase matches table
     await syncESPNToSupabase(newWeek);
 
-    // 3. Clear out all NFL picks for the fresh week:
-    // - Purges old game slates (__ rooms) so new games start completely empty
-    // - Wipes Weekly Superstars star picks in base rooms (keeps squads registered)
-    // - Resets all locks
-    const clearStats = await clearAllNFLWeekPicksServer();
+    // 3. Only clear picks if explicitly forced by Commissioner manual week turnover
+    let clearStats = { archivedSuperstars: 0, resetSuperstars: 0 };
+    if (isForced && Boolean(targetWeekOverride)) {
+      clearStats = await clearAllNFLWeekPicksServer(Math.max(1, newWeek - 1));
+    }
 
-    // 4. Auto-archive past-week/completed rooms to reduce board clutter (NEVER touch protected active rooms like BIGBANG)
-    if (!dbState.rooms) dbState.rooms = {};
-    const PROTECTED_ACTIVE_ROOM_CODES = new Set(['COUCH', 'HOOPS', 'BIGBANG']);
-    Object.entries(dbState.rooms).forEach(([key, meta]) => {
-      const [code] = key.split('_');
-      if (!PROTECTED_ACTIVE_ROOM_CODES.has(code) && !meta.isArchived) {
-        meta.isArchived = true;
-        meta.archivedAt = new Date().toISOString();
-      }
-    });
-
-    saveDatabase(dbState);
-
-    // 5. Update status and broadcast to all connected clients
-    weeklyRescanState.lastRescanTimestamp = new Date().toISOString();
+    // 4. Update status and broadcast to all connected clients
+    const nowIso = new Date().toISOString();
+    weeklyRescanState.lastRescanTimestamp = nowIso;
     weeklyRescanState.lastRescanWeek = newWeek;
     weeklyRescanState.inProgress = false;
+    dbState.lastRescanTimestamp = nowIso;
+    dbState.lastRescanWeek = newWeek;
+    saveDatabase(dbState);
 
-    console.log(`[Weekly Rescan] ✓ Tuesday 4:00 AM EST rescan complete for Week ${newWeek}! Archived ${clearStats.archivedSuperstars} past superstars, reset ${clearStats.resetSuperstars} Weekly Superstars squads.`);
+    console.log(`[Weekly Rescan] ✓ Tuesday 4:00 AM EST schedule check complete for Week ${newWeek}!`);
 
-    // Broadcast SSE to all connected clients so they refresh with fresh picks & week
+    // Broadcast SSE to all connected clients
     const payload = JSON.stringify({
       type: 'weekly_rescan_completed',
       week: newWeek,
       activeWeek: newWeek,
       timestamp: weeklyRescanState.lastRescanTimestamp,
-      clearedPicks: true,
+      clearedPicks: Boolean(isForced && targetWeekOverride),
       stats: clearStats,
-      message: `Week ${newWeek} slate is active! All previous week picks have been cleared.`,
+      message: `Week ${newWeek} schedule & rosters active.`,
     });
     for (const client of sseClients.values()) {
       try {
         client.res.write(`event: tuesday_rescan_completed\ndata: ${payload}\n\n`);
-        client.res.write(`event: week_picks_cleared\ndata: ${payload}\n\n`);
         client.res.write(`data: ${payload}\n\n`);
       } catch {
         // ignore
@@ -1392,8 +1398,16 @@ function checkTuesday4AMSchedule(): void {
     ? new Date(weeklyRescanState.lastRescanTimestamp)
     : null;
 
-  // If last rescan was before this week's Tuesday 4:00 AM EST, trigger automatic rescan!
-  if (!lastRescanDate || lastRescanDate.getTime() < lastTue4AM.getTime()) {
+  // Never wipe on startup: initialize timestamp if missing
+  if (!lastRescanDate) {
+    weeklyRescanState.lastRescanTimestamp = now.toISOString();
+    dbState.lastRescanTimestamp = weeklyRescanState.lastRescanTimestamp;
+    saveDatabase(dbState);
+    return;
+  }
+
+  // Only trigger if last rescan was strictly before this week's Tuesday 4:00 AM EST
+  if (lastRescanDate.getTime() < lastTue4AM.getTime()) {
     console.log(`[Weekly Rescan] Tuesday 4:00 AM EST threshold passed! Triggering automatic weekly rescan...`);
     executeWeeklyTuesdayRescan(false);
   }

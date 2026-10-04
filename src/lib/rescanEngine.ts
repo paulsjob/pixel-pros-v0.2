@@ -128,13 +128,13 @@ export function getWeeklyRescanCountdown(now = new Date()): {
  * Checks if a Tuesday 4:00 AM EST rescan is due based on local/cached state
  */
 export function isWeeklyRescanDue(lastRescanIso?: string | null, now = new Date()): boolean {
+  if (!lastRescanIso) return false;
   const lastTue = getLastTuesday4AMEST(now);
-  if (!lastRescanIso) return true;
   try {
     const lastDate = new Date(lastRescanIso);
     return lastDate.getTime() < lastTue.getTime();
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -284,14 +284,13 @@ export async function executeCompleteWeeklyRescan(
       }
     }
 
-    // 3. Clear old matches cache, purge stale game slates, and reset Weekly Superstars picks for the fresh week
-    onProgress?.(`Clearing past-week picks and syncing official NFL Week ${upcomingWeek} matchups...`);
+    // 3. Clear old matches cache and sync official NFL Week matchups
+    onProgress?.(`Syncing official NFL Week ${upcomingWeek} matchups...`);
     try {
       localStorage.removeItem('pixel_pros_synced_matches_nfl');
-      await clearClientAllWeekPicks('nfl');
       await syncESPNData('nfl');
     } catch (syncErr) {
-      console.warn('Could not sync ESPN matches/clear picks during rescan:', syncErr);
+      console.warn('Could not sync ESPN matches during rescan:', syncErr);
     }
 
     // 4. Fetch live injuries

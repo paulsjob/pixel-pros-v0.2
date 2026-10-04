@@ -1508,7 +1508,7 @@ export async function fetchRoomRosters(roomCode: string, sport: SportId = 'nfl')
 
       if (!existing || entryTime >= existingTime || (incomingHasPicks && !existingHasPicks)) {
         setSquadLockState(rRoomCode, userName, isLocked, sport);
-        rosterMap.set(mapKey, {
+        const resolvedRoster = {
           id: r.id || existing?.id || `rost_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
           room_code: rRoomCode,
           user_name: userName,
@@ -1519,7 +1519,17 @@ export async function fetchRoomRosters(roomCode: string, sport: SportId = 'nfl')
           star_3_id: r.star_3_id || existing?.star_3_id || '',
           is_locked: isLocked,
           updated_at: r.updated_at || new Date().toISOString(),
-        });
+        };
+        rosterMap.set(mapKey, resolvedRoster);
+
+        if (resolvedRoster.star_1_id || resolvedRoster.star_2_id || resolvedRoster.star_3_id) {
+          try {
+            localStorage.setItem(
+              `pixel_pros_roster_${sport}_${rRoomCode}_${userName}`,
+              JSON.stringify([resolvedRoster.star_1_id, resolvedRoster.star_2_id, resolvedRoster.star_3_id])
+            );
+          } catch {}
+        }
       }
     });
   };
@@ -1974,35 +1984,7 @@ export async function clearClientAllWeekPicks(sport: SportId = 'nfl'): Promise<b
     }
   }
 
-  // 2. Call backend /api/rosters/clear-week-picks
-  try {
-    await apiFetch('/api/rosters/clear-week-picks', {
-      method: 'POST',
-      body: JSON.stringify({ sport }),
-    });
-  } catch (err) {
-    console.warn('Error calling /api/rosters/clear-week-picks:', err);
-  }
-
-  // 3. Fallback direct Supabase update if configured client-side
-  if (checkSupabaseConfigured() && sport === 'nfl') {
-    try {
-      const client = getSupabaseClient();
-      await client.from('user_rosters').delete().like('room_code', '%__%').eq('sport', 'nfl');
-      await client.from('user_rosters').update({
-        star_1_id: '',
-        star_2_id: '',
-        star_3_id: '',
-        is_locked: false,
-        device_id: 'UNLOCKED',
-        updated_at: new Date().toISOString(),
-      }).not('room_code', 'like', '%__%').eq('sport', 'nfl');
-    } catch (sbErr) {
-      console.warn('Supabase client week clear error:', sbErr);
-    }
-  }
-
-  // 4. Dispatch events to notify UI components
+  // 2. Dispatch events to notify UI components
   if (typeof window !== 'undefined') {
     window.dispatchEvent(
       new CustomEvent('pixel_pros_week_picks_cleared', {
@@ -2048,8 +2030,13 @@ export function subscribeToRoomRosters(
       eventSource.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          if (data && data.room_code && data.room_code.toUpperCase() === clean) {
-            onUpdate();
+          if (data && data.room_code) {
+            const eventRoom = data.room_code.toUpperCase();
+            const baseRoom = clean.split('__')[0];
+            const eventBase = eventRoom.split('__')[0];
+            if (eventRoom === clean || eventBase === baseRoom || eventRoom.startsWith(`${baseRoom}__`)) {
+              onUpdate();
+            }
           }
         } catch {}
       };

@@ -110,9 +110,7 @@ export function getCurrentNFLWeek(): number {
       if (!isNaN(parsed) && parsed >= calendarWeek) {
         return parsed;
       } else if (!isNaN(parsed) && parsed < calendarWeek) {
-        // Roll over detected: clear previous week match cache and wipe old picks for the fresh week
         localStorage.removeItem('pixel_pros_synced_matches_nfl');
-        clearClientAllWeekPicks('nfl').catch(() => {});
       }
     }
   } catch {
@@ -130,9 +128,7 @@ export function setCurrentNFLWeek(weekNumber: number) {
   try {
     const prev = localStorage.getItem('pixel_pros_current_nfl_week');
     if (prev && prev !== String(weekNumber)) {
-      // Clear old matches cache and old picks when moving to a new week
       localStorage.removeItem('pixel_pros_synced_matches_nfl');
-      clearClientAllWeekPicks('nfl').catch(() => {});
     }
     localStorage.setItem('pixel_pros_current_nfl_week', String(weekNumber));
     localStorage.setItem('pixel_pros_current_nfl_week_label', `Week ${weekNumber}`);
@@ -144,7 +140,6 @@ export function setCurrentNFLWeek(weekNumber: number) {
 export function setManualNFLWeek(weekNumber: number) {
   try {
     localStorage.removeItem('pixel_pros_synced_matches_nfl');
-    clearClientAllWeekPicks('nfl').catch(() => {});
     localStorage.setItem('pixel_pros_current_nfl_week', String(weekNumber));
     localStorage.setItem('pixel_pros_current_nfl_week_label', `Week ${weekNumber}`);
   } catch {}

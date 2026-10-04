@@ -203,14 +203,14 @@ export default function App() {
   // Overarching App Mode:
   // 'game' = INDIVIDUAL GAME BATTLE (e.g. Thursday Night Football PIT@CLE)
   // 'total_week' = TOTAL WEEK (Weekly Superstars & Mega Battle Leaderboard)
-  const [appMode, setAppMode] = useState<'game' | 'total_week'>('game');
+  const [appMode, setAppMode] = useState<'game' | 'total_week'>('total_week');
   const [activeSlateId, setActiveSlateId] = useState<string>(() => {
     try {
       const sport = (localStorage.getItem('pixel_pros_sport') as SportId) || 'nfl';
       const saved = localStorage.getItem(`pixel_pros_active_slate_${sport}`);
       if (saved && saved.trim()) return saved.trim();
     } catch {}
-    return 'PIT@CLE';
+    return 'SUPERSTARS';
   });
   const activeSlateIdRef = useRef<string>(activeSlateId);
   const [showArchivedInSwitcher, setShowArchivedInSwitcher] = useState<boolean>(false);
@@ -725,6 +725,27 @@ export default function App() {
       } catch {}
     }
 
+    // Seamless UX: If active slate currently has no picks, but this squad has picks in Weekly SUPERSTARS,
+    // automatically jump to SUPERSTARS so the user immediately sees their saved picks!
+    if (!s1 && !s2 && !s3 && activeSlateId !== 'SUPERSTARS') {
+      const superRoster = roomRosters.find(
+        (r) => (r.room_code || '').toUpperCase() === baseRoom && r.user_name.toUpperCase() === cleanName
+      );
+      if (superRoster && (superRoster.star_1_id || superRoster.star_2_id || superRoster.star_3_id)) {
+        setActiveSlateId('SUPERSTARS');
+        setAppMode('total_week');
+        const masterList = rosterRef.current.length > 0 ? rosterRef.current : roster;
+        s1 = resolveCompetitorById(superRoster.star_1_id, masterList, null, currentSport);
+        s2 = resolveCompetitorById(superRoster.star_2_id, masterList, null, currentSport);
+        s3 = resolveCompetitorById(superRoster.star_3_id, masterList, null, currentSport);
+        const isExplicitlyUnlocked =
+          superRoster.is_locked === false ||
+          String(superRoster.is_locked) === 'false' ||
+          String(superRoster.device_id).toUpperCase() === 'UNLOCKED';
+        isLockedFromDb = !isExplicitlyUnlocked && Boolean(superRoster.is_locked || superRoster.device_id === 'LOCKED');
+      }
+    }
+
     // STRICT GAME VALIDATION: If this slate is a specific matchup (AWAY@HOME),
     // players MUST belong to AWAY or HOME. Never let players from other games leak in!
     if (activeSlateId && activeSlateId.includes('@') && activeSlateId !== 'SUPERSTARS') {
@@ -840,6 +861,15 @@ export default function App() {
     setUserName(scopedUser);
 
     registerActiveRoom(clean, nextSport);
+    fetchRoomRosters(clean, nextSport).then((fresh) => {
+      setRoomRosters(fresh);
+      const valid = fresh.filter((r) => !isGhostUser(r.user_name));
+      if (!scopedUser && valid.length > 0) {
+        const firstUser = valid[0].user_name.toUpperCase();
+        setUserName(firstUser);
+        handleSelectSquad(firstUser);
+      }
+    });
     fetchAllActiveRooms(clean, nextSport).then((rooms) => {
       setAvailableRooms(rooms);
     });
@@ -1081,18 +1111,19 @@ export default function App() {
 
         let activeUserClean = (userName || '').trim().toUpperCase();
 
-        // Safety: If userName is not set at all, check local storage or default;
-        // NEVER forcefully hijack or rename the user's identity to another player's squad in the room!
+        // If userName is not set on this device, check local storage or choose first squad in the room
         if (!activeUserClean) {
           try {
             const saved = localStorage.getItem(`pixel_pros_user_${currentSport}_${roomCode}`);
             if (saved && saved.trim()) {
               activeUserClean = saved.trim().toUpperCase();
+            } else if (validRosters.length > 0) {
+              activeUserClean = validRosters[0].user_name.toUpperCase();
             } else {
               activeUserClean = 'DAD';
             }
           } catch {
-            activeUserClean = 'DAD';
+            activeUserClean = validRosters.length > 0 ? validRosters[0].user_name.toUpperCase() : 'DAD';
           }
           setUserName(activeUserClean);
         }
@@ -1243,27 +1274,21 @@ export default function App() {
     };
   }, [currentSport]);
 
-  // Tuesday 4:00 AM EST Automated Rescan Handler & Week Rollover Pick Clearance
+  // Tuesday 4:00 AM EST Automated Rescan Handler
   useEffect(() => {
-    // 0. Auto-clear picks if saved picks week lags behind active calendar NFL week
+    // 0. Ensure week is tracked without destructive clearing
     const activeWeekNum = getCurrentNFLWeek();
-    const lastPicksWeek = localStorage.getItem('pixel_pros_picks_active_week');
-    if (lastPicksWeek && lastPicksWeek !== String(activeWeekNum)) {
-      clearClientAllWeekPicks('nfl').catch(() => {});
-      setSquadSlots({ star1: null, star2: null, star3: null });
-      setIsLocked(false);
-    }
     localStorage.setItem('pixel_pros_picks_active_week', String(activeWeekNum));
 
-    // 1. Check if rescan is due on initial app mount
+    // 1. Check if depth chart/schedule rescan is due on initial app mount
     const lastRescan = localStorage.getItem('pixel_pros_last_tuesday_rescan');
-    if (isWeeklyRescanDue(lastRescan)) {
+    if (!lastRescan) {
+      localStorage.setItem('pixel_pros_last_tuesday_rescan', new Date().toISOString());
+    } else if (isWeeklyRescanDue(lastRescan)) {
       executeCompleteWeeklyRescan().then((res) => {
         if (res.success) {
-          setSquadSlots({ star1: null, star2: null, star3: null });
-          setIsLocked(false);
           setRefreshTick((t) => t + 1);
-          showToast(`⚡ Tuesday 4:00 AM Rescan: Week ${res.activeWeek} is open for picks! All previous week picks cleared.`);
+          showToast(`⚡ Tuesday 4:00 AM Rescan: Week ${res.activeWeek} matchups and rosters updated!`);
         }
       });
     }
