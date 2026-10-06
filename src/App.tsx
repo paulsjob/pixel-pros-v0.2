@@ -725,9 +725,8 @@ export default function App() {
       } catch {}
     }
 
-    // Seamless UX: If active slate currently has no picks, but this squad has picks in Weekly SUPERSTARS,
-    // automatically jump to SUPERSTARS so the user immediately sees their saved picks!
-    if (!s1 && !s2 && !s3 && activeSlateId !== 'SUPERSTARS') {
+    // Seamless UX: If active slate currently has no picks, automatically jump to where this squad has picks!
+    if (!s1 && !s2 && !s3) {
       const superRoster = roomRosters.find(
         (r) => (r.room_code || '').toUpperCase() === baseRoom && r.user_name.toUpperCase() === cleanName
       );
@@ -743,6 +742,31 @@ export default function App() {
           String(superRoster.is_locked) === 'false' ||
           String(superRoster.device_id).toUpperCase() === 'UNLOCKED';
         isLockedFromDb = !isExplicitlyUnlocked && Boolean(superRoster.is_locked || superRoster.device_id === 'LOCKED');
+      } else {
+        // Check game slates in this room
+        const slateWithPicks = roomRosters.find(
+          (r) =>
+            (r.room_code || '').toUpperCase().startsWith(`${baseRoom}__`) &&
+            r.user_name.toUpperCase() === cleanName &&
+            (r.star_1_id || r.star_2_id || r.star_3_id)
+        );
+        if (slateWithPicks) {
+          const matchCode = slateWithPicks.room_code.split('__')[1];
+          if (matchCode) {
+            const slateName = matchCode.replace('_', '@');
+            setActiveSlateId(slateName);
+            setAppMode('game');
+            const masterList = rosterRef.current.length > 0 ? rosterRef.current : roster;
+            s1 = resolveCompetitorById(slateWithPicks.star_1_id, masterList, null, currentSport);
+            s2 = resolveCompetitorById(slateWithPicks.star_2_id, masterList, null, currentSport);
+            s3 = resolveCompetitorById(slateWithPicks.star_3_id, masterList, null, currentSport);
+            const isExplicitlyUnlocked =
+              slateWithPicks.is_locked === false ||
+              String(slateWithPicks.is_locked) === 'false' ||
+              String(slateWithPicks.device_id).toUpperCase() === 'UNLOCKED';
+            isLockedFromDb = !isExplicitlyUnlocked && Boolean(slateWithPicks.is_locked || slateWithPicks.device_id === 'LOCKED');
+          }
+        }
       }
     }
 
@@ -1293,26 +1317,19 @@ export default function App() {
       });
     }
 
-    // 2. Custom event listener from client-side triggered rescan / picks cleared
+    // 2. Custom event listener from client-side triggered rescan
     const handleRescanEvent = (e: any) => {
-      setSquadSlots({ star1: null, star2: null, star3: null });
-      setIsLocked(false);
-      setRoomRosters((prev) =>
-        prev.map((r) =>
-          (r.sport || 'nfl') === 'nfl' && !r.room_code.includes('__')
-            ? { ...r, star_1_id: '', star_2_id: '', star_3_id: '', is_locked: false, device_id: 'UNLOCKED' }
-            : r
-        )
-      );
+      // Depth chart & injury updates must NEVER wipe users' saved picks!
       fetchRoomRosters(roomCode, currentSport).then((fresh) => {
         if (fresh) setRoomRosters(fresh);
       });
       setRefreshTick((t) => t + 1);
       const wk = e.detail?.week || getCurrentNFLWeek();
-      showToast(`⚡ Tuesday 4:00 AM Rescan: Week ${wk} active! All picks cleared for new games & Weekly Superstars.`);
+      showToast(`⚡ NFL Week ${wk} depth charts & matchups synchronized!`);
     };
 
     const handlePicksCleared = () => {
+      // Explicit commissioner / turnover action
       setSquadSlots({ star1: null, star2: null, star3: null });
       setIsLocked(false);
       setRoomRosters((prev) =>
@@ -1338,7 +1355,8 @@ export default function App() {
       const processRescanPayload = (rawData: string) => {
         try {
           const data = JSON.parse(rawData);
-          if (data.type === 'weekly_rescan_completed' || data.type === 'week_picks_cleared' || data.activeWeek || data.week) {
+          // ONLY clear picks if explicitly flagged as clearedPicks: true on week_picks_cleared
+          if (data.type === 'week_picks_cleared' && data.clearedPicks === true) {
             const wk = data.activeWeek || data.week || getCurrentNFLWeek();
             setSquadSlots({ star1: null, star2: null, star3: null });
             setIsLocked(false);
@@ -1354,7 +1372,11 @@ export default function App() {
             });
             setRefreshTick((t) => t + 1);
             syncESPNData(currentSport).catch(() => {});
-            showToast(`⚡ NFL Week ${wk} active! All previous week picks cleared for new games & Weekly Superstars.`);
+            showToast(`⚡ NFL Week ${wk} active! Previous week picks archived.`);
+          } else if (data.type === 'weekly_rescan_completed') {
+            // Matchup and injury updates only - protect all user picks
+            setRefreshTick((t) => t + 1);
+            syncESPNData(currentSport).catch(() => {});
           }
         } catch {}
       };
@@ -1570,6 +1592,34 @@ export default function App() {
 
     return () => {
       unsubscribeRoom();
+    };
+  }, [roomCode, currentSport]);
+
+  // Resilient Network Layer: Re-validate room picks whenever user refocuses tab or resumes app
+  useEffect(() => {
+    const handleRevalidate = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        fetchRoomRosters(roomCode, currentSport).then((fresh) => {
+          if (fresh && fresh.length > 0) {
+            setRoomRosters((prev) => {
+              const map = new Map<string, UserRoster>();
+              for (const r of prev) map.set(`${r.room_code}__${r.user_name}`, r);
+              for (const r of fresh) map.set(`${r.room_code}__${r.user_name}`, r);
+              return Array.from(map.values());
+            });
+          }
+        });
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleRevalidate);
+    window.addEventListener('focus', handleRevalidate);
+    window.addEventListener('online', handleRevalidate);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleRevalidate);
+      window.removeEventListener('focus', handleRevalidate);
+      window.removeEventListener('online', handleRevalidate);
     };
   }, [roomCode, currentSport]);
 

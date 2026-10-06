@@ -297,11 +297,15 @@ export const MyTeamView: React.FC<MyTeamViewProps> = ({
               >
                 <Sparkles size={11} className={activeSlateId === 'SUPERSTARS' ? 'text-[#facc15]' : 'text-[#b45309]'} />
                 <span>SUPERSTARS</span>
-                {slatePicksStatus?.['SUPERSTARS']?.isLocked && (
+                {slatePicksStatus?.['SUPERSTARS']?.isLocked ? (
                   <span className="text-[8px] px-1 py-0.2 rounded-2xs font-bold shrink-0 bg-[#0a2d52] text-[#38bdf8]">
                     🔒
                   </span>
-                )}
+                ) : (slatePicksStatus?.['SUPERSTARS']?.count || 0) > 0 ? (
+                  <span className="text-[8px] px-1 py-0.2 rounded-2xs font-bold shrink-0 bg-[#854d0e] text-[#fef08a]">
+                    ⭐{slatePicksStatus['SUPERSTARS'].count}
+                  </span>
+                ) : null}
               </button>
 
               {/* 2. All Matches in Kickoff Order */}
@@ -334,11 +338,15 @@ export const MyTeamView: React.FC<MyTeamViewProps> = ({
                     {isLive && <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-600 animate-pulse shrink-0" />}
                     {isFinal && <span className="text-[8px]">🏁</span>}
                     <span>{away}@{home}</span>
-                    {statusInfo?.isLocked && (
+                    {statusInfo?.isLocked ? (
                       <span className="text-[8px] px-1 py-0.2 rounded-2xs font-bold shrink-0 bg-[#0a2d52] text-[#38bdf8]">
                         🔒
                       </span>
-                    )}
+                    ) : statusInfo && statusInfo.count > 0 ? (
+                      <span className="text-[8px] px-1 py-0.2 rounded-2xs font-bold shrink-0 bg-[#854d0e] text-[#fef08a]">
+                        ⭐{statusInfo.count}
+                      </span>
+                    ) : null}
                   </button>
                 );
               })}

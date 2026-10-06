@@ -3,6 +3,15 @@ import { Competitor, Match, SportId, UserRoster } from '../types';
 import { getDeviceId } from './deviceIdentity';
 import { getCurrentNFLWeek } from './espnSync';
 import {
+  saveRosterToFirestore,
+  fetchRoomRostersFromFirestore,
+  subscribeToRoomRostersFirestore,
+  saveRoomToFirestore,
+  fetchAllRoomsFromFirestore,
+  setSquadLockFirestore,
+} from './firestoreService';
+import { syncQueue } from './syncQueue';
+import {
   DEFAULT_NFL_COMPETITORS,
   DEFAULT_NFL_MATCHES,
   getTeamColors,
@@ -788,6 +797,20 @@ export async function upsertUserRoster(
     window.dispatchEvent(new CustomEvent('pixel_pros_roster_update', { detail: record }));
   } catch {}
 
+  // 1b. Central Persistent Database: Google Cloud Firestore (multi-device authoritative)
+  let fsOk = false;
+  try {
+    await saveRosterToFirestore(record);
+    fsOk = true;
+  } catch (fsErr) {
+    console.warn('Firestore primary upsert notice:', fsErr);
+  }
+
+  // If direct write failed or offline, persist to resilient outbox
+  if (!fsOk) {
+    syncQueue.enqueueRosterUpsert(record).catch(() => {});
+  }
+
   // 2. Central persistent server database (cross-device multi-player)
   try {
     const apiRes = await apiFetch<{ success: boolean; data?: any }>('/api/rosters', {
@@ -925,6 +948,24 @@ export async function fetchAllActiveRooms(
       roomMap.get(mapKey)!.squads.add(uName);
     }
   };
+
+  // 0. Firestore Registered Rooms
+  try {
+    const fsRooms = await fetchAllRoomsFromFirestore(currentSportHint);
+    if (fsRooms && Array.isArray(fsRooms)) {
+      fsRooms.forEach((r) => {
+        const code = (r.roomCode || '').trim().toUpperCase();
+        if (code) {
+          const key = `${code}_${r.sport}`;
+          if (!roomMap.has(key)) {
+            roomMap.set(key, { roomCode: code, sport: r.sport, squads: new Set() });
+          }
+        }
+      });
+    }
+  } catch (fsErr) {
+    console.warn('Firestore fetch rooms notice:', fsErr);
+  }
 
   // 1. Supabase (if configured) - queries public.rooms and public.user_rosters directly
   if (checkSupabaseConfigured()) {
@@ -1534,6 +1575,16 @@ export async function fetchRoomRosters(roomCode: string, sport: SportId = 'nfl')
     });
   };
 
+  // 0. Primary Central Cloud Database: Firestore (instant cloud query)
+  try {
+    const firestoreRosters = await fetchRoomRostersFromFirestore(cleanRoom, sport);
+    if (firestoreRosters && firestoreRosters.length > 0) {
+      ingestRosters(firestoreRosters);
+    }
+  } catch (fsErr) {
+    console.warn('Firestore fetch rosters notice:', fsErr);
+  }
+
   // 1. Ingest local storage cache first
   try {
     const localKey = sport === 'nba' ? `pixel_pros_rosters_${cleanRoom}_nba` : `pixel_pros_rosters_${cleanRoom}`;
@@ -1740,6 +1791,9 @@ export async function toggleSquadLock(
   if (!cleanUser) return false;
 
   setSquadLockState(cleanRoom, cleanUser, isLocked, sport);
+  setSquadLockFirestore(cleanRoom, cleanUser, sport, isLocked).catch(() => {
+    syncQueue.enqueueLockToggle(cleanRoom, cleanUser, sport, isLocked).catch(() => {});
+  });
 
   // Update cached roster arrays in local storage
   const baseRoom = cleanRoom.includes('__') ? cleanRoom.split('__')[0] : cleanRoom;
@@ -2011,6 +2065,16 @@ export function subscribeToRoomRosters(
 
   const clean = (roomCode || (sport === 'nba' ? 'HOOPS' : 'COUCH')).trim().toUpperCase();
 
+  // 0. Primary Central Firestore Realtime Listener (instant cloud push across all devices)
+  let unsubscribeFirestore: (() => void) | null = null;
+  try {
+    unsubscribeFirestore = subscribeToRoomRostersFirestore(clean, sport, () => {
+      onUpdate();
+    });
+  } catch (fsErr) {
+    console.warn('Firestore realtime subscribe notice:', fsErr);
+  }
+
   // 1. Listen for in-tab window events
   const handleLocalUpdate = (e: any) => {
     const detail = e?.detail;
@@ -2119,6 +2183,11 @@ export function subscribeToRoomRosters(
   }
 
   return () => {
+    if (unsubscribeFirestore) {
+      try {
+        unsubscribeFirestore();
+      } catch {}
+    }
     window.removeEventListener('pixel_pros_roster_update', handleLocalUpdate);
     if (eventSource) {
       eventSource.close();

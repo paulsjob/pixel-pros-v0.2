@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import { createClient } from '@supabase/supabase-js';
 import { DEFAULT_NFL_COMPETITORS, resolveCompetitorById } from './src/utils/teamData.js';
+import { saveRosterToFirestore, setSquadLockFirestore } from './src/lib/firestoreService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -446,6 +447,19 @@ app.post('/api/rosters', (req: Request, res: Response) => {
   saveDatabase(dbState);
   broadcastRoomUpdate(cleanRoom, cleanSport, { action: 'upsert', roster: updatedRecord });
 
+  // Sync to Firestore in background (central cloud database)
+  saveRosterToFirestore({
+    room_code: cleanRoom,
+    user_name: cleanUser,
+    sport: cleanSport,
+    star_1_id: finalS1,
+    star_2_id: finalS2,
+    star_3_id: finalS3,
+    is_locked: guardedLocked,
+    device_id: guardedLocked ? 'LOCKED' : 'UNLOCKED',
+    updated_at: updatedRecord.updated_at,
+  }).catch((fsErr: any) => console.warn('Firestore upsert sync error from Express:', fsErr));
+
   // Sync to Supabase in background
   if (serverSupabase) {
     Promise.resolve(
@@ -616,6 +630,11 @@ app.post('/api/rosters/lock', (req: Request, res: Response) => {
 
   saveDatabase(dbState);
   broadcastRoomUpdate(cleanRoom, cleanSport, { action: 'lock', is_locked: lockedBool, all });
+
+  // Sync lock to Firestore in background
+  if (!all && cleanUser) {
+    setSquadLockFirestore(cleanRoom, cleanUser, cleanSport, lockedBool).catch(() => {});
+  }
 
   if (serverSupabase) {
     if (all) {

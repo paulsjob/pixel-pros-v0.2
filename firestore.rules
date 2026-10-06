@@ -1,0 +1,71 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-\\.:@]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function isValidRoster(data) {
+      return data.keys().hasAll(['room_code', 'user_name', 'sport', 'star_1_id', 'star_2_id', 'star_3_id', 'is_locked'])
+        && data.room_code is string && data.room_code.size() <= 64
+        && data.user_name is string && data.user_name.size() <= 64
+        && data.sport is string && (data.sport == 'nfl' || data.sport == 'nba')
+        && data.star_1_id is string && data.star_1_id.size() <= 64
+        && data.star_2_id is string && data.star_2_id.size() <= 64
+        && data.star_3_id is string && data.star_3_id.size() <= 64
+        && data.is_locked is bool;
+    }
+
+    function isValidRoom(data) {
+      return data.keys().hasAll(['room_code', 'sport'])
+        && data.room_code is string && data.room_code.size() <= 64
+        && data.sport is string && (data.sport == 'nfl' || data.sport == 'nba');
+    }
+
+    function isValidLock(data) {
+      return data.keys().hasAll(['room_code', 'user_name', 'sport', 'is_locked'])
+        && data.room_code is string && data.room_code.size() <= 64
+        && data.user_name is string && data.user_name.size() <= 64
+        && data.sport is string && (data.sport == 'nfl' || data.sport == 'nba')
+        && data.is_locked is bool;
+    }
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // User Rosters
+    match /user_rosters/{rosterId} {
+      allow read: if true;
+      allow create, update: if isValidId(rosterId) && isValidRoster(incoming());
+      allow delete: if isValidId(rosterId);
+    }
+
+    // Rooms
+    match /rooms/{roomId} {
+      allow read: if true;
+      allow create, update: if isValidId(roomId) && isValidRoom(incoming());
+      allow delete: if isValidId(roomId);
+    }
+
+    // Locks
+    match /locks/{lockId} {
+      allow read: if true;
+      allow create, update: if isValidId(lockId) && isValidLock(incoming());
+      allow delete: if isValidId(lockId);
+    }
+
+    // Test connection
+    match /test/{testId} {
+      allow read: if true;
+      allow write: if true;
+    }
+  }
+}

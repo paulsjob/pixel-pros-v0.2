@@ -1,0 +1,140 @@
+{
+  "entities": {
+    "UserRoster": {
+      "title": "User Roster",
+      "description": "A squad lineup with 3 selected stars for a given room, user, and sport",
+      "type": "object",
+      "properties": {
+        "room_code": {
+          "type": "string",
+          "description": "Room or slate identifier code",
+          "maxLength": 64
+        },
+        "user_name": {
+          "type": "string",
+          "description": "Squad or player name",
+          "maxLength": 64
+        },
+        "sport": {
+          "type": "string",
+          "description": "Sport identifier (nfl or nba)",
+          "enum": ["nfl", "nba"]
+        },
+        "star_1_id": {
+          "type": "string",
+          "description": "Player ID for star slot 1",
+          "maxLength": 64
+        },
+        "star_2_id": {
+          "type": "string",
+          "description": "Player ID for star slot 2",
+          "maxLength": 64
+        },
+        "star_3_id": {
+          "type": "string",
+          "description": "Player ID for star slot 3",
+          "maxLength": 64
+        },
+        "is_locked": {
+          "type": "boolean",
+          "description": "Whether the roster is locked from editing"
+        },
+        "device_id": {
+          "type": "string",
+          "description": "Device lock status or identifier",
+          "maxLength": 64
+        },
+        "updated_at": {
+          "type": "string",
+          "description": "ISO timestamp of last update",
+          "maxLength": 64
+        }
+      },
+      "required": ["room_code", "user_name", "sport", "star_1_id", "star_2_id", "star_3_id", "is_locked"]
+    },
+    "Room": {
+      "title": "Room",
+      "description": "Active battle room or league code",
+      "type": "object",
+      "properties": {
+        "room_code": {
+          "type": "string",
+          "description": "Room uppercase code",
+          "maxLength": 64
+        },
+        "sport": {
+          "type": "string",
+          "description": "Sport identifier",
+          "enum": ["nfl", "nba"]
+        },
+        "isArchived": {
+          "type": "boolean",
+          "description": "Whether room is archived"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Creation timestamp",
+          "maxLength": 64
+        }
+      },
+      "required": ["room_code", "sport"]
+    },
+    "Lock": {
+      "title": "Lock",
+      "description": "Lock status entry for a room and squad",
+      "type": "object",
+      "properties": {
+        "room_code": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "user_name": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "sport": {
+          "type": "string",
+          "enum": ["nfl", "nba"]
+        },
+        "is_locked": {
+          "type": "boolean"
+        },
+        "updated_at": {
+          "type": "string",
+          "maxLength": 64
+        }
+      },
+      "required": ["room_code", "user_name", "sport", "is_locked"]
+    },
+    "TestConnection": {
+      "title": "Test Connection",
+      "description": "Health check document",
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "maxLength": 32
+        }
+      },
+      "required": ["status"]
+    }
+  },
+  "firestore": {
+    "/user_rosters/{rosterId}": {
+      "schema": "UserRoster",
+      "description": "Saved player rosters and star selections per room and user"
+    },
+    "/rooms/{roomId}": {
+      "schema": "Room",
+      "description": "Registered battle rooms and league spaces"
+    },
+    "/locks/{lockId}": {
+      "schema": "Lock",
+      "description": "Explicit lock toggles for squads"
+    },
+    "/test/{testId}": {
+      "schema": "TestConnection",
+      "description": "Connection test document"
+    }
+  }
+}

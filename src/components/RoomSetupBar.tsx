@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Users, Archive, ArchiveRestore } from 'lucide-react';
 import { archiveRoom } from '../lib/supabaseClient';
+import { syncQueue, SyncStatus } from '../lib/syncQueue';
 
 interface RoomSetupBarProps {
   userName: string;
@@ -21,6 +22,14 @@ export const RoomSetupBar: React.FC<RoomSetupBarProps> = ({
   const [localName, setLocalName] = useState(userName);
   const [localRoom, setLocalRoom] = useState(roomCode);
   const [isArchived, setIsArchived] = useState(false);
+  const [syncState, setSyncState] = useState<{ status: SyncStatus; pendingCount: number }>(() => syncQueue.getStatus());
+
+  useEffect(() => {
+    const unsub = syncQueue.subscribe((status, pendingCount) => {
+      setSyncState({ status, pendingCount });
+    });
+    return () => unsub();
+  }, []);
 
   useEffect(() => {
     setLocalName(userName);
@@ -206,9 +215,40 @@ export const RoomSetupBar: React.FC<RoomSetupBarProps> = ({
               <span>{memberCount} ON COUCH</span>
             </div>
           )}
-          <div className="flex items-center gap-1.5 px-2 py-1 bg-[#12579b]/40 border border-[#12579b] text-[#38bdf8] rounded-2xs whitespace-nowrap">
-            <span className="inline-block w-2 h-2 rounded-full bg-[#22c55e] animate-pulse"></span>
-            <span className="text-[9px] sm:text-[10px]">LIVE SYNC</span>
+          <div
+            className={`flex items-center gap-1.5 px-2 py-1 rounded-2xs whitespace-nowrap border transition-colors ${
+              syncState.status === 'offline'
+                ? 'bg-[#7f1d1d]/40 border-[#b91c1c] text-[#fca5a5]'
+                : syncState.status === 'syncing'
+                ? 'bg-[#854d0e]/40 border-[#eab308] text-[#fef08a]'
+                : 'bg-[#12579b]/40 border-[#12579b] text-[#38bdf8]'
+            }`}
+            title={
+              syncState.status === 'offline'
+                ? 'Offline - Picks saved locally in outbox and will auto-sync when online'
+                : syncState.status === 'syncing'
+                ? `Syncing changes to cloud (${syncState.pendingCount} queued)`
+                : 'Connected to central cloud database'
+            }
+          >
+            <span
+              className={`inline-block w-2 h-2 rounded-full ${
+                syncState.status === 'offline'
+                  ? 'bg-[#ef4444]'
+                  : syncState.status === 'syncing'
+                  ? 'bg-[#eab308] animate-ping'
+                  : 'bg-[#22c55e] animate-pulse'
+              }`}
+            />
+            <span className="text-[9px] sm:text-[10px]">
+              {syncState.status === 'offline'
+                ? 'OFFLINE (LOCAL)'
+                : syncState.status === 'syncing'
+                ? syncState.pendingCount > 0
+                  ? `SYNCING (${syncState.pendingCount})`
+                  : 'SYNCING...'
+                : 'CLOUD SYNCED'}
+            </span>
           </div>
         </div>
 
