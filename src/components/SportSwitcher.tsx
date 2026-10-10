@@ -3,48 +3,22 @@ import { SportId } from '../types';
 
 interface SportSwitcherProps {
   currentSport: SportId;
-  onSportChange: (sport: SportId) => void;
+  onSportChange?: (sport: SportId) => void;
 }
 
 export const SportSwitcher: React.FC<SportSwitcherProps> = ({
-  currentSport,
-  onSportChange,
+  currentSport = 'nfl',
 }) => {
+  // NBA button removed per user request: "you can lose the NBA button for sure. we don't need that at the moment."
   return (
     <div
-      role="group"
-      aria-label="Sport Selection"
-      className="inline-flex items-center bg-[#070b16] p-0.5 sm:p-1 border-2 border-[#1e293b] rounded-xs shadow-[0_2px_0_0_#050912]"
+      role="status"
+      aria-label="Active Sport: NFL Gridiron"
+      className="inline-flex items-center gap-1 bg-[#052e16] px-2 py-0.5 md:py-1 border border-[#16a34a] rounded-xs font-pixel text-[9px] md:text-xs text-[#86efac] select-none shadow-[0_2px_0_0_#022c22] shrink-0"
+      title="NFL Gridiron Fantasy"
     >
-      {/* NFL Button */}
-      <button
-        type="button"
-        onClick={() => onSportChange('nfl')}
-        className={`touch-manipulation flex items-center gap-1 px-1.5 md:px-2.5 py-0.5 md:py-1 font-pixel text-[10px] md:text-xs rounded-2xs cursor-pointer transition-all active:translate-y-0.5 select-none ${
-          currentSport === 'nfl'
-            ? 'bg-[#15803d] text-white border border-[#22c55e] shadow-[0_2px_0_0_#052e16] font-bold'
-            : 'text-[#94a3b8] hover:text-[#fae5b8] hover:bg-[#15233d]/60 border border-transparent'
-        }`}
-        title="Switch to NFL Fantasy"
-      >
-        <span className="text-xs select-none">🏈</span>
-        <span className="hidden md:inline">NFL</span>
-      </button>
-
-      {/* NBA Button */}
-      <button
-        type="button"
-        onClick={() => onSportChange('nba')}
-        className={`touch-manipulation flex items-center gap-1 px-1.5 md:px-2.5 py-0.5 md:py-1 font-pixel text-[10px] md:text-xs rounded-2xs cursor-pointer transition-all active:translate-y-0.5 select-none ${
-          currentSport === 'nba'
-            ? 'bg-[#c2410c] text-[#fef08a] border border-[#f97316] shadow-[0_2px_0_0_#431407] font-bold animate-pulse'
-            : 'text-[#94a3b8] hover:text-[#fae5b8] hover:bg-[#15233d]/60 border border-transparent'
-        }`}
-        title="Switch to NBA Fantasy"
-      >
-        <span className="text-xs select-none">🏀</span>
-        <span className="hidden md:inline">NBA</span>
-      </button>
+      <span className="text-xs select-none">🏈</span>
+      <span className="font-bold tracking-wider">NFL</span>
     </div>
   );
 };

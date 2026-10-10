@@ -73,8 +73,10 @@ export interface Competitor {
   season_stats?: SeasonStats;
   badges: string[];
   score: number;
+  currentScore?: number;
   current_score?: number;
   current_stats?: string;
+  name?: string;
   last_game_score?: number;
   last_game_stats?: string;
   lastGameScore?: number;
@@ -153,4 +155,42 @@ export interface UserRoster {
   star_3_id: string;
   is_locked?: boolean;
   updated_at?: string;
+}
+
+export type ReactionEmoji = '👑' | '🔥' | '🧊' | '🎯' | '🚀' | '🍿' | '🧂';
+
+export interface SquadReactionEntry {
+  emoji: ReactionEmoji;
+  sender: string;
+  timestamp: string;
+}
+
+export interface TrustReceipt {
+  id: string;
+  receipt_id: string;
+  room_code: string;
+  user_name: string;
+  sport: SportId;
+  slate_id: string;
+  locked_at: string;
+  locked_at_display: string;
+  is_on_time: boolean;
+  is_classified: boolean;
+  star_ids: string[];
+  star_names: string[];
+  star_teams?: string[];
+  tamper_hash: string;
+}
+
+export interface AchievementBadge {
+  id: string;
+  title: string;
+  tagline: string;
+  icon: string;
+  color: string;
+  tier: 'bronze' | 'silver' | 'gold' | 'diamond';
+  criteria: string;
+  unlocked: boolean;
+  progressText?: string;
+  unlockedAt?: string;
 }

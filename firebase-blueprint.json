@@ -106,6 +106,37 @@
       },
       "required": ["room_code", "user_name", "sport", "is_locked"]
     },
+    "TrustReceipt": {
+      "title": "Trust Receipt",
+      "description": "Tamper-evident verification receipt proving lineup locked before kickoff",
+      "type": "object",
+      "properties": {
+        "room_code": { "type": "string", "maxLength": 64 },
+        "user_name": { "type": "string", "maxLength": 64 },
+        "sport": { "type": "string", "enum": ["nfl", "nba"] },
+        "slate_id": { "type": "string", "maxLength": 64 },
+        "receipt_id": { "type": "string", "maxLength": 64 },
+        "locked_at": { "type": "string", "maxLength": 64 },
+        "is_on_time": { "type": "boolean" },
+        "is_classified": { "type": "boolean" },
+        "star_names": { "type": "array", "items": { "type": "string" } },
+        "tamper_hash": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["room_code", "user_name", "sport", "receipt_id", "locked_at"]
+    },
+    "SquadReaction": {
+      "title": "Squad Reaction",
+      "description": "Social banter reaction emojis stamped by family members on squads",
+      "type": "object",
+      "properties": {
+        "room_code": { "type": "string", "maxLength": 64 },
+        "target_user": { "type": "string", "maxLength": 64 },
+        "sport": { "type": "string", "enum": ["nfl", "nba"] },
+        "reactions": { "type": "object" },
+        "updated_at": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["room_code", "target_user", "sport"]
+    },
     "TestConnection": {
       "title": "Test Connection",
       "description": "Health check document",
@@ -131,6 +162,14 @@
     "/locks/{lockId}": {
       "schema": "Lock",
       "description": "Explicit lock toggles for squads"
+    },
+    "/trust_receipts/{receiptId}": {
+      "schema": "TrustReceipt",
+      "description": "Official tamper-evident timestamped lock receipts"
+    },
+    "/squad_reactions/{reactionId}": {
+      "schema": "SquadReaction",
+      "description": "Family emoji reactions and social banter"
     },
     "/test/{testId}": {
       "schema": "TestConnection",

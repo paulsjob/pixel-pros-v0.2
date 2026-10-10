@@ -1570,8 +1570,8 @@ export function getPlayerGameState(match: Match | null | undefined): PlayerGameS
  * - Passing yards: 1 pt per 25 yards (Math.floor(pass_yds / 25))
  * - Rushing yards: 1 pt per 10 yards (Math.floor(rush_yds / 10))
  * - Receiving yards: 1 pt per 10 yards (Math.floor(rec_yds / 10))
- * - Field goal: 3 pts
- * - Big stop / Def: 2 pts
+ * - 2-Point Conversion: 2 pts
+ * NOTE: Explicitly NO field goals and NO big stops per family league rules!
  */
 export function calculateNFLPlayerScore(stats: any): number {
   if (!stats) return 0;
@@ -1579,17 +1579,16 @@ export function calculateNFLPlayerScore(stats: any): number {
   const passYds = Number(stats.pass_yds ?? stats.passing_yards ?? stats.passingYards ?? 0);
   const rushYds = Number(stats.rush_yds ?? stats.rushing_yards ?? stats.rushingYards ?? 0);
   const recYds = Number(stats.rec_yds ?? stats.receiving_yards ?? stats.receivingYards ?? 0);
-  const fgs = Number(stats.fgs ?? 0);
-  const stops = Number(stats.stops ?? stats.big_stops ?? 0);
+  const twoPt = Number(stats.two_pt ?? stats.twoPointConversions ?? 0);
 
   const tdPts = tds * 6;
   const passPts = Math.floor(passYds / 25);
   const rushPts = Math.floor(rushYds / 10);
   const recPts = Math.floor(recYds / 10);
-  const fgPts = fgs * 3;
-  const stopPts = stops * 2;
+  const twoPtPts = twoPt * 2;
 
-  return tdPts + passPts + rushPts + recPts + fgPts + stopPts;
+  // NO field goals, NO defense stops
+  return tdPts + passPts + rushPts + recPts + twoPtPts;
 }
 
 /**

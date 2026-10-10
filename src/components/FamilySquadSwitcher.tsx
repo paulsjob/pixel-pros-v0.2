@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Users, Plus, Lock, Check, X, ShieldAlert, ChevronLeft, ChevronRight, Home } from 'lucide-react';
+import { Users, Plus, Check, X, ShieldAlert, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface FamilySquadSwitcherProps {
   activeUserName: string;
@@ -26,7 +26,6 @@ export const FamilySquadSwitcher: React.FC<FamilySquadSwitcherProps> = ({
   onSelectSquad,
   onCreateSquad,
   onDeleteSquad,
-  onOpenRoomModal,
   isAddDrawerOpen,
   onOpenAddDrawer,
   onCloseAddDrawer,
@@ -37,8 +36,9 @@ export const FamilySquadSwitcher: React.FC<FamilySquadSwitcherProps> = ({
   const [newSquadName, setNewSquadName] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [squadToDrop, setSquadToDrop] = useState<string | null>(null);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
-  // Normalize active user name for clean comparison (DO NOT default to 'DAD'!)
+  // Normalize active user name for clean comparison
   const normalizedActive = (activeUserName || '').trim().toUpperCase();
 
   // Ensure current active user is included in the list of squads ONLY if non-empty
@@ -55,9 +55,9 @@ export const FamilySquadSwitcher: React.FC<FamilySquadSwitcherProps> = ({
   }
 
   const squadList = Array.from(squadMap.values());
-
-  // Household gamification: find highest score in room
   const maxScore = Math.max(0, ...squadList.map((s) => s.totalScore ?? 0));
+
+  const quickFamilySuggestions = ['DAD', 'MOM', 'LEO', 'VIOLET', 'KID 1', 'KID 2'];
 
   const carouselRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
@@ -82,7 +82,6 @@ export const FamilySquadSwitcher: React.FC<FamilySquadSwitcherProps> = ({
     };
   }, [squadList.length]);
 
-  // Whenever the active squad changes or list updates, auto-scroll the active squad into full view
   useEffect(() => {
     const timer = setTimeout(() => {
       if (carouselRef.current) {
@@ -96,9 +95,8 @@ export const FamilySquadSwitcher: React.FC<FamilySquadSwitcherProps> = ({
     return () => clearTimeout(timer);
   }, [normalizedActive, squadList.length]);
 
-  // Active squad navigation: steps through squadList left/right and scrolls into view
   const handleNavigateSquad = (direction: 'left' | 'right') => {
-    if (squadList.length === 0) return;
+    if (squadList.length <= 1) return;
 
     const currentIndex = squadList.findIndex((s) => s.userName === normalizedActive);
     let targetIndex = 0;
@@ -111,14 +109,6 @@ export const FamilySquadSwitcher: React.FC<FamilySquadSwitcherProps> = ({
     const targetSquad = squadList[targetIndex];
     if (targetSquad) {
       onSelectSquad(targetSquad.userName);
-    }
-
-    if (carouselRef.current) {
-      const items = Array.from(carouselRef.current.querySelectorAll<HTMLElement>('[data-squad-item="true"]'));
-      const targetItem = items[targetIndex];
-      if (targetItem) {
-        targetItem.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
-      }
     }
   };
 
@@ -136,18 +126,18 @@ export const FamilySquadSwitcher: React.FC<FamilySquadSwitcherProps> = ({
     setErrorMsg(null);
   };
 
-  const handleCommitNewSquad = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    const clean = newSquadName.trim().toUpperCase();
+  const handleCommitNewSquad = (nameToCommit?: string) => {
+    const raw = nameToCommit || newSquadName;
+    const clean = raw.trim().toUpperCase();
     if (!clean) {
       setErrorMsg('Please enter a squad name');
       return;
     }
     if (squadMap.has(clean)) {
-      // If squad already exists, simply switch to it!
       onSelectSquad(clean);
       if (onCloseAddDrawer) onCloseAddDrawer();
       setInternalIsAdding(false);
+      setIsDropdownOpen(false);
       setNewSquadName('');
       return;
     }
@@ -155,56 +145,42 @@ export const FamilySquadSwitcher: React.FC<FamilySquadSwitcherProps> = ({
     onCreateSquad(clean);
     if (onCloseAddDrawer) onCloseAddDrawer();
     setInternalIsAdding(false);
+    setIsDropdownOpen(false);
     setNewSquadName('');
     setErrorMsg(null);
   };
 
-  const quickFamilySuggestions = ['DAD', 'MOM', 'LEO', 'VIOLET', 'KID 1', 'KID 2'];
-
   return (
     <>
-      {/* Unified Responsive Family Squad Switcher Bar - Single Tight Row */}
-      <div className="w-full bg-[#080d1a] border-b-2 border-[#1a264a] box-border">
-        <div className="max-w-5xl mx-auto px-1.5 sm:px-4 py-1 flex items-center justify-between gap-1 sm:gap-2.5 w-full box-border">
+      {/* Unified Responsive Family Squad Switcher Bar - Single Balanced Row */}
+      <div className="w-full bg-[#080d1a] border-b-2 border-[#1a264a] box-border overflow-x-hidden">
+        <div className="max-w-5xl mx-auto px-1.5 sm:px-4 py-1 flex items-center justify-between gap-1.5 sm:gap-2.5 w-full box-border">
           
-          {/* Room Button (Left) */}
+          {/* Household Label (Left) */}
           <div className="flex items-center shrink-0 select-none">
-            <button
-              type="button"
-              id="squad-switcher-room-button"
-              onClick={onOpenRoomModal}
-              className="touch-manipulation flex items-center gap-1 px-1.5 md:px-3 py-0.5 md:py-1.5 bg-[#15233d] hover:bg-[#1f345b] active:bg-[#1f345b] border border-[#38bdf8]/60 hover:border-[#38bdf8] text-[#fae5b8] rounded-xs font-pixel text-[9px] md:text-xs font-bold whitespace-nowrap active:scale-95 cursor-pointer shadow-xs transition-all"
-              title="Click to view and switch rooms"
-            >
-              <Home size={11} className="text-[#38bdf8] shrink-0" />
-              <span className="text-[#f59e0b] font-bold tracking-wider max-w-[50px] sm:max-w-none truncate">{roomCode}</span>
-              <span className="text-[7px] sm:text-[8px] px-1 py-0.2 bg-[#f59e0b]/20 text-[#fde047] border border-[#f59e0b]/40 rounded-2xs font-pixel uppercase tracking-wide hidden sm:inline-block">
-                SEASON
-              </span>
-              <span className="text-[8px] text-[#93c5fd]">✏️</span>
-            </button>
+            <div className="flex items-center gap-1.5 px-1.5 md:px-2 py-0.5 md:py-1 text-[#38bdf8] font-pixel text-[9px] md:text-xs font-bold">
+              <Users size={13} className="text-[#38bdf8] shrink-0" />
+              <span className="tracking-wider text-[#93c5fd]">SQUADS:</span>
+            </div>
           </div>
 
           {/* Squad Carousel (Center - takes remaining width) */}
-          <div className="flex-1 min-w-0 flex items-center gap-0.5 sm:gap-1.5">
-            <button
-              type="button"
-              disabled={squadList.length <= 1}
-              onClick={() => handleNavigateSquad('left')}
-              className={`touch-manipulation shrink-0 w-6 h-6 md:w-8 md:h-8 flex items-center justify-center rounded-xs font-pixel select-none transition-all ${
-                squadList.length > 1
-                  ? 'bg-[#15233d] hover:bg-[#20365c] active:bg-[#20365c] text-[#38bdf8] border border-[#38bdf8] cursor-pointer shadow-xs active:scale-95'
-                  : 'bg-[#0b1021] text-gray-600 border border-gray-700/50 opacity-30 cursor-default pointer-events-none'
-              }`}
-              title={squadList.length > 1 ? "Previous squad" : "Only 1 squad in room"}
-              aria-label="Previous squad"
-            >
-              <ChevronLeft size={13} strokeWidth={3} />
-            </button>
+          <div className="flex-1 min-w-0 flex items-center gap-1 sm:gap-1.5 overflow-hidden">
+            {squadList.length > 1 && (
+              <button
+                type="button"
+                onClick={() => handleNavigateSquad('left')}
+                className="touch-manipulation shrink-0 w-6 h-6 md:w-7 md:h-7 flex items-center justify-center rounded-xs font-pixel bg-[#15233d] hover:bg-[#20365c] active:bg-[#20365c] text-[#38bdf8] border border-[#38bdf8]/60 cursor-pointer shadow-xs active:scale-95 transition-all"
+                title="Previous squad"
+                aria-label="Previous squad"
+              >
+                <ChevronLeft size={13} strokeWidth={3} />
+              </button>
+            )}
 
             <div
               ref={carouselRef}
-              className="snap-x snap-mandatory flex-1 min-w-0 flex items-center gap-1 sm:gap-2 overflow-x-auto no-scrollbar touch-pan-x px-0.5 py-0.5 scroll-smooth"
+              className="snap-x snap-mandatory flex-1 min-w-0 flex items-center gap-1 sm:gap-1.5 overflow-x-auto no-scrollbar touch-pan-x px-0.5 py-0.5 scroll-smooth"
             >
               {squadList.map((squad) => {
                 const isActive = squad.userName === normalizedActive;
@@ -221,28 +197,30 @@ export const FamilySquadSwitcher: React.FC<FamilySquadSwitcherProps> = ({
                       onSelectSquad(squad.userName);
                       e.currentTarget.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
                     }}
-                    className={`snap-center touch-manipulation shrink-0 flex items-center gap-1 md:gap-1.5 px-2 md:px-3.5 py-0.5 md:py-1.5 font-pixel text-[10px] md:text-xs rounded-xs border-2 transition-all cursor-pointer select-none whitespace-nowrap active:translate-y-0.5 ${
+                    className={`snap-center touch-manipulation shrink-0 flex items-center gap-1 md:gap-1.5 px-2 md:px-3 py-0.5 md:py-1 font-pixel text-[10px] md:text-xs rounded-xs border-2 transition-all cursor-pointer select-none whitespace-nowrap active:translate-y-0.5 ${
                       isActive
-                        ? 'bg-[#155e9e] text-[#fae5b8] border-[#38bdf8] shadow-[0_2px_0_0_#051a30] font-bold ring-1 ring-[#38bdf8]/50'
+                        ? 'bg-[#155e9e] text-[#fae5b8] border-[#38bdf8] shadow-[0_2px_0_0_#051a30] font-bold ring-1 ring-[#38bdf8]/60'
                         : 'bg-[#1a2238] text-[#94a3b8] hover:text-[#fae5b8] active:text-[#fae5b8] border-[#273552] hover:border-[#38bdf8]/60 active:bg-[#232e4b]'
                     }`}
                     title={
                       isLeader
-                        ? `👑 Household Leader! ${squad.userName} (${scoreVal} pts)`
+                        ? `👑 Room Leader! ${squad.userName} (${scoreVal} pts)`
                         : isActive
-                        ? `Currently editing ${squad.userName}'s squad`
-                        : `Switch to ${squad.userName}'s squad`
+                        ? `Currently picking for ${squad.userName}`
+                        : `Switch to ${squad.userName}`
                     }
                   >
                     {isLeader ? (
                       <span className="text-xs select-none">👑</span>
+                    ) : scoreVal >= 30 ? (
+                      <span className="text-xs select-none">🔥</span>
                     ) : isActive ? (
                       <span className="text-[#fde047]">★</span>
                     ) : null}
                     <span className="font-bold">{squad.userName}</span>
-                    {squad.isLocked && <span className="text-[9px] md:text-[10px]" title="Locked">🔒</span>}
+                    {squad.isLocked && <span className="text-[9px]" title="Locked">🔒</span>}
                     <span
-                      className={`text-[8px] md:text-[9px] font-bold px-1 md:px-1.5 py-0.2 md:py-0.5 rounded-2xs shrink-0 ${
+                      className={`text-[8px] md:text-[9px] font-bold px-1 py-0.2 rounded-2xs shrink-0 ${
                         isActive
                           ? 'bg-[#0a2d52] text-[#fde047]'
                           : isLeader
@@ -252,7 +230,7 @@ export const FamilySquadSwitcher: React.FC<FamilySquadSwitcherProps> = ({
                     >
                       {scoreVal}p
                     </span>
-                    {isActive && !squad.isLocked && onDeleteSquad && (
+                    {isActive && !squad.isLocked && onDeleteSquad && squadList.length > 1 && (
                       <span
                         role="button"
                         tabIndex={0}
@@ -269,45 +247,151 @@ export const FamilySquadSwitcher: React.FC<FamilySquadSwitcherProps> = ({
                   </button>
                 );
               })}
+
+              {/* If few squads exist, offer 1-click quick add chips right in the bar! */}
+              {squadList.length < 3 && (
+                quickFamilySuggestions
+                  .filter((name) => !squadMap.has(name))
+                  .slice(0, 2)
+                  .map((suggested) => (
+                    <button
+                      key={suggested}
+                      type="button"
+                      onClick={() => handleCommitNewSquad(suggested)}
+                      className="touch-manipulation shrink-0 flex items-center gap-1 px-1.5 md:px-2 py-0.5 md:py-1 font-pixel text-[9px] md:text-[10px] rounded-xs border border-dashed border-[#16a34a]/80 bg-[#14532d]/30 hover:bg-[#14532d] text-[#86efac] hover:text-white transition-all cursor-pointer whitespace-nowrap active:scale-95"
+                      title={`Quickly add ${suggested}'s squad to this couch`}
+                    >
+                      <Plus size={10} strokeWidth={3} />
+                      <span>{suggested}</span>
+                    </button>
+                  ))
+              )}
             </div>
 
-            <button
-              type="button"
-              disabled={squadList.length <= 1}
-              onClick={() => handleNavigateSquad('right')}
-              className={`touch-manipulation shrink-0 w-6 h-6 md:w-8 md:h-8 flex items-center justify-center rounded-xs font-pixel select-none transition-all ${
-                squadList.length > 1
-                  ? 'bg-[#15233d] hover:bg-[#20365c] active:bg-[#20365c] text-[#38bdf8] border border-[#38bdf8] cursor-pointer shadow-xs active:scale-95'
-                  : 'bg-[#0b1021] text-gray-600 border border-gray-700/50 opacity-30 cursor-default pointer-events-none'
-              }`}
-              title={squadList.length > 1 ? "Next squad" : "Only 1 squad in room"}
-              aria-label="Next squad"
-            >
-              <ChevronRight size={13} strokeWidth={3} />
-            </button>
+            {squadList.length > 1 && (
+              <button
+                type="button"
+                onClick={() => handleNavigateSquad('right')}
+                className="touch-manipulation shrink-0 w-6 h-6 md:w-7 md:h-7 flex items-center justify-center rounded-xs font-pixel bg-[#15233d] hover:bg-[#20365c] active:bg-[#20365c] text-[#38bdf8] border border-[#38bdf8]/60 cursor-pointer shadow-xs active:scale-95 transition-all"
+                title="Next squad"
+                aria-label="Next squad"
+              >
+                <ChevronRight size={13} strokeWidth={3} />
+              </button>
+            )}
           </div>
 
-          {/* [+SQUAD] Button (Right) */}
-          <div className="flex items-center shrink-0 select-none">
+          {/* [+ SQUAD] Button (Right) */}
+          <div className="flex items-center shrink-0">
             <button
               type="button"
               id="squad-switcher-add-btn"
               onClick={handleStartAdd}
-              className="touch-manipulation flex items-center gap-1 px-1.5 md:px-3 py-0.5 md:py-1.5 font-pixel text-[9px] md:text-xs rounded-xs border-2 border-[#16a34a] bg-[#14532d] hover:bg-[#16a34a] active:bg-[#16a34a] text-[#86efac] hover:text-white font-bold whitespace-nowrap active:scale-95 cursor-pointer shadow-xs transition-all"
+              className="touch-manipulation flex items-center gap-1 px-2 md:px-2.5 py-1 font-pixel text-[9px] md:text-xs rounded-xs border border-[#16a34a] bg-[#14532d] hover:bg-[#16a34a] active:bg-[#16a34a] text-[#86efac] hover:text-white font-bold whitespace-nowrap active:scale-95 cursor-pointer shadow-xs transition-all"
               title="Add family squad to this room"
             >
               <Plus size={11} strokeWidth={3} />
-              <span className="hidden xs:inline">SQUAD</span>
+              <span>SQUAD</span>
             </button>
           </div>
 
         </div>
       </div>
 
-      {/* Add Squad Drawer (Responsive: bottom sheet on mobile, centered modal dialog on desktop) */}
+      {/* Quick Switch Player / Squad Dropdown Modal */}
+      {isDropdownOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/75 backdrop-blur-2xs animate-in fade-in duration-150">
+          <div
+            className="fixed inset-0"
+            onClick={() => setIsDropdownOpen(false)}
+          />
+          <div className="relative z-10 w-full max-w-sm p-4 bg-[#0d1527] border-2 border-[#38bdf8] shadow-[0_10px_30px_rgba(0,0,0,0.9)] rounded-xs animate-in zoom-in-95 duration-150 box-border text-[#fae5b8]">
+            <div className="flex items-center justify-between border-b border-[#1a264a] pb-2 mb-3">
+              <div className="flex items-center gap-1.5 font-pixel text-xs text-[#38bdf8] font-bold">
+                <Users size={14} />
+                <span>SELECT FAMILY SQUAD</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsDropdownOpen(false)}
+                className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-white rounded-2xs cursor-pointer"
+              >
+                <X size={14} />
+              </button>
+            </div>
+
+            <p className="font-retro text-xs text-[#94a3b8] mb-2.5">
+              Who is playing on couch <strong className="text-[#fde047] font-pixel">{roomCode}</strong>?
+            </p>
+
+            {/* List of active squads */}
+            <div className="space-y-1.5 max-h-48 overflow-y-auto mb-3 pr-1">
+              {squadList.map((sq) => {
+                const isSelected = sq.userName === normalizedActive;
+                return (
+                  <button
+                    key={sq.userName}
+                    type="button"
+                    onClick={() => {
+                      onSelectSquad(sq.userName);
+                      setIsDropdownOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-between p-2 rounded-xs font-pixel text-xs border transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-[#155e9e] text-white border-[#38bdf8] font-bold shadow-xs'
+                        : 'bg-[#1a2238] text-[#94a3b8] hover:text-white border-[#273552] hover:border-[#38bdf8]/60'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span>{isSelected ? '★' : '👤'}</span>
+                      <span>{sq.userName}</span>
+                      {sq.isLocked && <span className="text-[10px]">🔒</span>}
+                    </div>
+                    <div className="text-[10px] text-[#fde047]">
+                      {sq.totalScore ?? 0} pts
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Quick 1-click presets */}
+            <div className="border-t border-[#1a264a] pt-2.5">
+              <span className="font-pixel text-[9px] text-[#64748b] block mb-1.5 uppercase">
+                Quick 1-Click Family Presets:
+              </span>
+              <div className="flex flex-wrap gap-1.5 mb-3">
+                {quickFamilySuggestions.map((sug) => (
+                  <button
+                    key={sug}
+                    type="button"
+                    onClick={() => handleCommitNewSquad(sug)}
+                    className="touch-manipulation font-pixel text-[10px] px-2 py-1 bg-[#1a2238] hover:bg-[#16a34a] hover:text-white text-[#86efac] border border-[#16a34a]/60 rounded-2xs cursor-pointer active:scale-95 transition-all"
+                  >
+                    + {sug}
+                  </button>
+                ))}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setIsDropdownOpen(false);
+                  handleStartAdd();
+                }}
+                className="w-full py-1.5 bg-[#14532d] hover:bg-[#16a34a] text-[#86efac] hover:text-white font-pixel text-xs rounded-xs border border-[#16a34a] flex items-center justify-center gap-1.5 cursor-pointer font-bold shadow-xs active:translate-y-0.5"
+              >
+                <Plus size={13} strokeWidth={3} />
+                <span>CREATE CUSTOM SQUAD</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Squad Drawer (Bottom sheet on mobile, centered modal on desktop) */}
       {isAdding && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-xs animate-in fade-in duration-150">
-          {/* Backdrop overlay */}
           <div
             className="fixed inset-0"
             onClick={handleCancelAdd}
@@ -315,13 +399,13 @@ export const FamilySquadSwitcher: React.FC<FamilySquadSwitcherProps> = ({
           
           <div className="relative z-10 w-full sm:max-w-md p-4 sm:p-5 bg-[#0d1527] border-t-2 sm:border-2 border-[#38bdf8]/70 shadow-[0_-8px_20px_rgba(0,0,0,0.8)] sm:shadow-[0_12px_40px_rgba(0,0,0,0.9)] rounded-t-lg sm:rounded-md animate-in slide-in-from-bottom sm:zoom-in-95 duration-200 box-border">
             <div className="max-w-md mx-auto w-full">
-              <form onSubmit={handleCommitNewSquad}>
+              <form onSubmit={(e) => { e.preventDefault(); handleCommitNewSquad(); }}>
                 <div className="flex items-center justify-between mb-2">
                   <span className="font-pixel text-[11px] sm:text-xs text-[#38bdf8] font-bold tracking-wider">
                     NEW FAMILY SQUAD
                   </span>
                   <span className="font-pixel text-[9px] text-[#94a3b8]">
-                    ROOM: {roomCode}
+                    COUCH: {roomCode}
                   </span>
                 </div>
 
@@ -334,7 +418,7 @@ export const FamilySquadSwitcher: React.FC<FamilySquadSwitcherProps> = ({
                     setNewSquadName(e.target.value.toUpperCase());
                     setErrorMsg(null);
                   }}
-                  placeholder="e.g. MOM or LEO"
+                  placeholder="e.g. DAD, MOM, LEO"
                   maxLength={14}
                   className="bg-[#1a2238] border-2 border-[#38bdf8] text-[#fae5b8] font-pixel text-xs px-3 py-2 rounded-xs focus:outline-none w-full uppercase placeholder:text-gray-500 mb-2 box-border"
                 />

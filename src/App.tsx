@@ -27,6 +27,7 @@ import {
   clearClientAllWeekPicks,
 } from './lib/supabaseClient';
 import { MyTeamView } from './components/MyTeamView';
+import { FamilySquadSwitcher } from './components/FamilySquadSwitcher';
 
 import { getBaseSeasonRoom, resolveCompetitorById, DEFAULT_NFL_MATCHES, DEFAULT_NFL_COMPETITORS, sortMatchesByKickoffAndStatus, getPlayerScoringDisplay, isPositionAllowedForSlot } from './utils/teamData';
 
@@ -61,6 +62,19 @@ import { DEFAULT_NBA_MATCHES, DEFAULT_NBA_COMPETITORS } from './utils/nbaTeamDat
 import { ROSTER_CACHE_VERSION } from './data/nflRosterManifest';
 import { Users, Trophy, HelpCircle, Share2, ShieldAlert, Plus, X } from 'lucide-react';
 import { useDeviceMode } from './utils/useDeviceMode';
+import { TrustReceiptModal } from './components/TrustReceiptModal';
+import { GamificationTrophyModal } from './components/GamificationTrophyModal';
+import { TrustReceipt, AchievementBadge } from './types';
+import {
+  subscribeRoomTrustReceipts,
+  saveTrustReceipt,
+  subscribeSquadReactions,
+  computeSquadAchievements,
+  generateTamperHash,
+  formatReceiptTimestamp,
+  buildReceiptDocId,
+  SquadReactionsMap,
+} from './lib/gamificationService';
 
 export default function App() {
   const { isMobile, isDesktop, deviceMode, setManualOverride } = useDeviceMode();
@@ -214,6 +228,59 @@ export default function App() {
   });
   const activeSlateIdRef = useRef<string>(activeSlateId);
   const [showArchivedInSwitcher, setShowArchivedInSwitcher] = useState<boolean>(false);
+
+  // Phase 3: Gamification & Social Trust States
+  const [trustReceipts, setTrustReceipts] = useState<TrustReceipt[]>([]);
+  const [selectedReceiptModal, setSelectedReceiptModal] = useState<TrustReceipt | null>(null);
+  const [isTrophyModalOpen, setIsTrophyModalOpen] = useState(false);
+  const [squadReactions, setSquadReactions] = useState<SquadReactionsMap>({});
+  const [isBluffMode, setIsBluffMode] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(`pixel_pros_bluff_${roomCode}_${userName}`) === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const currentReceipt = useMemo(() => {
+    const cleanU = (userName || '').trim().toUpperCase();
+    return (
+      trustReceipts.find(
+        (r) =>
+          (r.user_name || '').trim().toUpperCase() === cleanU &&
+          (r.slate_id === activeSlateId || (activeSlateId === 'SUPERSTARS' && r.slate_id === 'SUPERSTARS'))
+      ) || null
+    );
+  }, [trustReceipts, userName, activeSlateId]);
+
+  const squadBadges = useMemo(() => {
+    return computeSquadAchievements(userName, roomRosters, matches, roster, trustReceipts);
+  }, [userName, roomRosters, matches, roster, trustReceipts]);
+
+  const handleToggleBluffMode = () => {
+    setIsBluffMode((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(`pixel_pros_bluff_${roomCode}_${userName}`, String(next));
+      } catch {}
+      showToast(next ? '🕵️ Bluff Mode ON: Picks hidden until kickoff!' : '👁️ Bluff Mode OFF: Picks visible to family');
+      return next;
+    });
+  };
+
+  // Real-time synchronization of Social Trust Receipts and Family Banter Reactions
+  useEffect(() => {
+    const unsubReceipts = subscribeRoomTrustReceipts(roomCode, currentSport, (list) => {
+      setTrustReceipts(list);
+    });
+    const unsubReactions = subscribeSquadReactions(roomCode, currentSport, (map) => {
+      setSquadReactions(map);
+    });
+    return () => {
+      unsubReceipts();
+      unsubReactions();
+    };
+  }, [roomCode, currentSport]);
 
   useEffect(() => {
     activeSlateIdRef.current = activeSlateId;
@@ -1052,6 +1119,50 @@ export default function App() {
 
     const currentSlateLabel = currentSlate === 'SUPERSTARS' ? 'SUPERSTARS' : currentSlate;
 
+    // Generate Tamper-Evident Social Trust Receipt
+    const starIds = [
+      String(squadSlots.star1?.id || ''),
+      String(squadSlots.star2?.id || ''),
+      String(squadSlots.star3?.id || ''),
+    ];
+    const starNames = [
+      squadSlots.star1?.displayName || 'Star 1',
+      squadSlots.star2?.displayName || 'Star 2',
+      squadSlots.star3?.displayName || 'Star 3',
+    ];
+    const starTeams = [
+      squadSlots.star1?.teamCode || '',
+      squadSlots.star2?.teamCode || '',
+      squadSlots.star3?.teamCode || '',
+    ];
+
+    const nowIso = new Date().toISOString();
+    const tamperHash = generateTamperHash(roomCode, userName, currentSlate, nowIso, starIds);
+    const receiptCode = tamperHash.split('-')[1] || `${Math.floor(1000 + Math.random() * 9000)}`;
+
+    const newReceipt: TrustReceipt = {
+      id: buildReceiptDocId(roomCode, userName, currentSlate, currentSport),
+      receipt_id: `PX-${receiptCode}`,
+      room_code: roomCode,
+      user_name: userName,
+      sport: currentSport,
+      slate_id: currentSlate,
+      locked_at: nowIso,
+      locked_at_display: formatReceiptTimestamp(nowIso),
+      is_on_time: true,
+      is_classified: isBluffMode,
+      star_ids: starIds,
+      star_names: starNames,
+      star_teams: starTeams,
+      tamper_hash: tamperHash,
+    };
+
+    saveTrustReceipt(newReceipt).catch(() => {});
+    setTrustReceipts((prev) => {
+      const filtered = prev.filter((r) => r.id !== newReceipt.id);
+      return [newReceipt, ...filtered];
+    });
+
     if (advanceToNext) {
       // Find list of all game slates in EXACT CAROUSEL ORDER (sorted matches)
       const sorted = sortMatchesByKickoffAndStatus(matches || []);
@@ -1075,15 +1186,15 @@ export default function App() {
       if (nextSlate && nextSlate !== currentSlate) {
         const nextSlateLabel =
           nextSlate === 'SUPERSTARS' ? 'WEEKLY SUPERSTARS' : `GAME ${nextSlate.replace('@', ' @ ')}`;
-        showToast(`🔒 ${currentSlateLabel} LOCKED! Next Up: ${nextSlateLabel} ⭐`);
+        showToast(`🔒 ${currentSlateLabel} LOCKED! 📜 Receipt #PX-${receiptCode} · Next: ${nextSlateLabel} ⭐`);
         setTimeout(() => {
           handleSelectSlate(nextSlate);
         }, 280);
       } else {
-        showToast(`🔒 ${currentSlateLabel} LOCKED! 🎉 ALL GAME SLATES COMPLETE!`);
+        showToast(`🔒 ${currentSlateLabel} LOCKED! 📜 Receipt #PX-${receiptCode} 🎉 ALL GAMES SET!`);
       }
     } else {
-      showToast(`🔒 ${currentSlateLabel} SQUAD LOCKED!`);
+      showToast(`🔒 ${currentSlateLabel} LOCKED! 📜 Receipt #PX-${receiptCode}`);
     }
   };
 
@@ -1853,28 +1964,22 @@ export default function App() {
         <header className="flex-shrink-0 z-40 bg-[#080d1a] border-b-2 border-[#1a264a] w-full shadow-md overflow-x-hidden box-border">
           {/* Mobile Header (2-Row Layout, screen width <= 600px) */}
           <div className="sm:hidden w-full flex flex-col box-border">
-            {/* Row 1: Left: Logo (PROS) | Center: Sport switcher [ 🏈 | 🏀 ] | Right: Pinned Room badge + Rules */}
-            <div className="flex items-center justify-between px-2.5 py-1.5 border-b border-[#1a264a]/80 bg-[#080d1a] gap-1.5">
-              {/* Left: Pixel Pros logo icon and PROS title */}
-              <button
-                type="button"
-                onClick={() => setCurrentTab('squad')}
-                className="touch-manipulation flex items-center gap-1.5 cursor-pointer bg-transparent border-0 p-0 text-left shrink-0"
-              >
-                {currentSport === 'nfl' ? (
-                  <PixelShieldIcon size={20} color="#155e9e" className="shrink-0" />
-                ) : (
-                  <span className="text-base select-none">🏀</span>
-                )}
-                <span className="font-pixel text-[11px] text-[#fae5b8] tracking-wider font-bold">PROS</span>
-              </button>
-
-              {/* Center: Sport switcher [ 🏈 | 🏀 ] in compact pill */}
-              <div className="shrink-0 flex items-center justify-center">
-                <SportSwitcher currentSport={currentSport} onSportChange={handleSportChange} />
+            {/* Row 1: Left: Logo (PROS) + NFL badge | Right: Couch + Scoring Rules + Admin */}
+            <div className="flex items-center justify-between px-2 py-1.5 border-b border-[#1a264a]/80 bg-[#080d1a] gap-1 overflow-x-hidden w-full box-border">
+              {/* Left: Pixel Pros logo icon and PROS title + NFL indicator */}
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setCurrentTab('squad')}
+                  className="touch-manipulation flex items-center gap-1 cursor-pointer bg-transparent border-0 p-0 text-left shrink-0"
+                >
+                  <PixelShieldIcon size={18} color="#155e9e" className="shrink-0" />
+                  <span className="font-pixel text-[11px] text-[#fae5b8] tracking-wider font-bold">PROS</span>
+                </button>
+                <SportSwitcher currentSport={currentSport} />
               </div>
 
-              {/* Mobile Right Controls: Couch + Admin + Scoring Rules */}
+              {/* Mobile Right Controls: Couch + Scoring Rules + Admin */}
               <div className="flex items-center gap-1 shrink-0">
                 <button
                   type="button"
@@ -1886,89 +1991,95 @@ export default function App() {
                   title={`Couch: ${cleanRoom} (Click to switch)`}
                 >
                   <span>🛋️</span>
-                  <span className="font-bold truncate max-w-[65px]">{cleanRoom}</span>
+                  <span className="font-bold truncate max-w-[60px]">{cleanRoom}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsRulesModalOpen(true)}
+                  className="touch-manipulation px-1.5 py-0.5 flex items-center gap-1 bg-[#1a2238] hover:bg-[#283554] text-[#fde047] border border-[#273552] rounded-xs cursor-pointer shrink-0 active:scale-95 font-pixel text-[9px]"
+                  title="How Scoring Works"
+                  aria-label="How Scoring Works"
+                >
+                  <span>RULES</span>
                 </button>
 
                 <button
                   type="button"
                   id="mobile-admin-console-btn"
                   onClick={() => setIsCommissionerOpen(true)}
-                  className="touch-manipulation w-6.5 h-6.5 flex items-center justify-center bg-[#1a2238] hover:bg-[#283554] text-[#38bdf8] border border-[#3b82f6]/60 rounded-xs cursor-pointer shrink-0 active:scale-95"
+                  className="touch-manipulation w-6 h-6 flex items-center justify-center bg-[#1a2238] hover:bg-[#283554] text-[#38bdf8] border border-[#3b82f6]/60 rounded-xs cursor-pointer shrink-0 active:scale-95"
                   title="Master Admin Console (Rooms, Squads & ESPN Data Sync)"
                   aria-label="Master Admin Console"
                 >
-                  <ShieldAlert size={13} />
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setIsRulesModalOpen(true)}
-                  className="touch-manipulation w-6.5 h-6.5 flex items-center justify-center bg-[#1a2238] text-[#fde047] border border-[#273552] rounded-xs cursor-pointer shrink-0 active:scale-95"
-                  title="How Scoring Works"
-                  aria-label="How Scoring Works"
-                >
-                  <HelpCircle size={13} />
+                  <ShieldAlert size={12} />
                 </button>
               </div>
             </div>
 
-            {/* Row 2: Full-Width Navigation Segmented Tabs [ SQUAD ] [ LEADERBOARD ] */}
-            <div className="grid grid-cols-2 gap-1.5 px-2 py-1 bg-[#090e1f] border-b border-[#1a264a]/70 w-full box-border">
+            {/* Row 2: Full-Width Navigation Segmented Tabs [ SQUAD ] [ LEADERBOARD ] [ TROPHIES ] */}
+            <div className="grid grid-cols-3 gap-1 px-2 py-1 bg-[#090e1f] border-b border-[#1a264a]/70 w-full box-border">
               <button
                 type="button"
                 onClick={() => setCurrentTab('squad')}
-                className={`touch-manipulation py-1.5 flex items-center justify-center gap-1.5 font-pixel text-[10px] rounded-xs border-2 cursor-pointer transition-all active:scale-[0.98] ${
+                className={`touch-manipulation py-1.5 flex items-center justify-center gap-1 font-pixel text-[9px] rounded-xs border-2 cursor-pointer transition-all active:scale-[0.98] ${
                   currentTab === 'squad'
                     ? 'bg-[#12579b] text-[#fae5b8] border-[#38bdf8] font-bold shadow-xs'
                     : 'bg-[#141d33] text-[#fae5b8]/70 border-[#273552] hover:text-[#fae5b8]'
                 }`}
               >
-                <Users size={12} className={currentTab === 'squad' ? 'text-[#38bdf8]' : ''} />
+                <Users size={11} className={currentTab === 'squad' ? 'text-[#38bdf8]' : ''} />
                 <span>SQUAD</span>
               </button>
 
               <button
                 type="button"
                 onClick={handleSwitchToBoard}
-                className={`touch-manipulation py-1.5 flex items-center justify-center gap-1.5 font-pixel text-[10px] rounded-xs border-2 cursor-pointer transition-all active:scale-[0.98] ${
+                className={`touch-manipulation py-1.5 flex items-center justify-center gap-1 font-pixel text-[9px] rounded-xs border-2 cursor-pointer transition-all active:scale-[0.98] ${
                   currentTab === 'couch'
                     ? 'bg-[#12579b] text-[#fae5b8] border-[#38bdf8] font-bold shadow-xs'
                     : 'bg-[#141d33] text-[#fae5b8]/70 border-[#273552] hover:text-[#fae5b8]'
                 }`}
               >
-                <Trophy size={12} className={currentTab === 'couch' ? 'text-[#facc15]' : ''} />
+                <Trophy size={11} className={currentTab === 'couch' ? 'text-[#facc15]' : ''} />
                 <span>LEADERBOARD</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsTrophyModalOpen(true)}
+                className="touch-manipulation py-1.5 flex items-center justify-center gap-1 font-pixel text-[9px] rounded-xs border-2 border-[#273552] bg-[#141d33] hover:bg-[#1a2238] text-[#fde047] cursor-pointer transition-all active:scale-[0.98]"
+              >
+                <Trophy size={11} className="text-[#facc15]" />
+                <span>TROPHIES</span>
               </button>
             </div>
           </div>
 
           {/* Desktop & Landscape Header (> 600px) */}
-          <div className="hidden sm:flex max-w-5xl mx-auto px-2 sm:px-3 md:px-4 w-full py-1 sm:py-1.5 items-center justify-between gap-1 sm:gap-2 box-border">
-            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          <div className="hidden sm:flex max-w-5xl mx-auto px-2 sm:px-4 w-full py-1 sm:py-1.5 items-center justify-between gap-1.5 sm:gap-2 box-border overflow-x-hidden">
+            <div className="flex items-center gap-2 shrink-0">
               <button
                 onClick={() => setCurrentTab('squad')}
-                className="touch-manipulation flex items-center gap-1.5 sm:gap-2 cursor-pointer group bg-transparent border-0 p-0 text-left shrink-0"
+                className="touch-manipulation flex items-center gap-1.5 cursor-pointer group bg-transparent border-0 p-0 text-left shrink-0"
               >
-                {currentSport === 'nfl' ? (
-                  <PixelShieldIcon size={22} color="#155e9e" className="shrink-0" />
-                ) : (
-                  <span className="text-base select-none">🏀</span>
-                )}
-                <span className="font-pixel text-[10px] sm:text-xs md:text-sm text-[#fae5b8] tracking-wider group-hover:text-white transition-colors whitespace-nowrap">
-                  <span className="hidden md:inline">PIXEL </span>PROS
+                <PixelShieldIcon size={20} color="#155e9e" className="shrink-0" />
+                <span className="font-pixel text-[11px] sm:text-xs text-[#fae5b8] tracking-wider group-hover:text-white transition-colors whitespace-nowrap font-bold">
+                  PIXEL PROS
                 </span>
               </button>
 
-              <SportSwitcher currentSport={currentSport} onSportChange={handleSportChange} />
+              <SportSwitcher currentSport={currentSport} />
             </div>
 
-            <nav className="flex items-center gap-1.5 shrink-0">
+            <nav className="flex items-center gap-1 shrink-0">
               <button
+                type="button"
                 onClick={() => setCurrentTab('squad')}
-                className={`touch-manipulation px-2.5 py-1 sm:px-3 sm:py-1 flex items-center justify-center gap-1.5 font-pixel text-[10px] md:text-xs border-2 cursor-pointer transition-all ${
+                className={`touch-manipulation px-2.5 py-1 flex items-center justify-center gap-1.5 font-pixel text-[10px] md:text-xs border-2 cursor-pointer transition-all ${
                   currentTab === 'squad'
                     ? 'bg-[#12579b] text-[#fae5b8] border-[#0a2d52] ring-1 ring-[#38bdf8] font-bold shadow-xs'
-                    : 'bg-[#1a2238] text-[#fae5b8]/75 border-[#273552]'
+                    : 'bg-[#1a2238] text-[#fae5b8]/75 border-[#273552] hover:text-[#fae5b8]'
                 }`}
               >
                 <Users size={12} className={currentTab === 'squad' ? 'text-[#38bdf8]' : ''} />
@@ -1976,15 +2087,26 @@ export default function App() {
               </button>
 
               <button
+                type="button"
                 onClick={handleSwitchToBoard}
-                className={`touch-manipulation px-2.5 py-1 sm:px-3 sm:py-1 flex items-center justify-center gap-1.5 font-pixel text-[10px] md:text-xs border-2 cursor-pointer transition-all ${
+                className={`touch-manipulation px-2.5 py-1 flex items-center justify-center gap-1.5 font-pixel text-[10px] md:text-xs border-2 cursor-pointer transition-all ${
                   currentTab === 'couch'
                     ? 'bg-[#12579b] text-[#fae5b8] border-[#0a2d52] ring-1 ring-[#38bdf8] font-bold shadow-xs'
-                    : 'bg-[#1a2238] text-[#fae5b8]/75 border-[#273552]'
+                    : 'bg-[#1a2238] text-[#fae5b8]/75 border-[#273552] hover:text-[#fae5b8]'
                 }`}
               >
                 <Trophy size={12} className={currentTab === 'couch' ? 'text-[#facc15]' : ''} />
                 <span>LEADERBOARD</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsTrophyModalOpen(true)}
+                className="touch-manipulation px-2.5 py-1 flex items-center justify-center gap-1.5 font-pixel text-[10px] md:text-xs border-2 cursor-pointer transition-all bg-[#1a2238] hover:bg-[#283554] text-[#fde047] hover:text-white border-[#273552] hover:border-[#fde047]/60 active:scale-95 shadow-xs"
+                title="Trophy Cabinet & Social Trust Ledger"
+              >
+                <Trophy size={12} className="text-[#facc15]" />
+                <span>TROPHIES</span>
               </button>
             </nav>
 
@@ -1995,7 +2117,7 @@ export default function App() {
                   setTempRoomCode(roomCode);
                   setIsRoomModalOpen(true);
                 }}
-                className="touch-manipulation flex items-center gap-1.5 px-2.5 py-1 bg-[#1a2238] hover:bg-[#283554] border border-[#d4a86a] text-[#fde047] rounded-xs font-pixel text-[9px] sm:text-xs cursor-pointer shadow-xs shrink-0"
+                className="touch-manipulation flex items-center gap-1 px-2 py-1 bg-[#1a2238] hover:bg-[#283554] border border-[#d4a86a] text-[#fde047] rounded-xs font-pixel text-[9px] sm:text-xs cursor-pointer shadow-xs shrink-0"
                 title={`Couch: ${cleanRoom} (Click to switch)`}
               >
                 <span>🛋️</span>
@@ -2005,34 +2127,54 @@ export default function App() {
               <button
                 type="button"
                 onClick={handleShareRoom}
-                className="touch-manipulation flex items-center gap-1 px-1.5 py-0.5 sm:px-2 sm:py-1 bg-[#064e3b] hover:bg-[#047857] text-[#34d399] hover:text-white border border-[#059669] rounded-xs font-pixel text-[9px] sm:text-xs cursor-pointer shadow-xs shrink-0"
+                className="touch-manipulation w-7 h-7 flex items-center justify-center bg-[#064e3b] hover:bg-[#047857] text-[#34d399] hover:text-white border border-[#059669] rounded-xs cursor-pointer shadow-xs shrink-0 active:scale-95"
                 title="Invite to Couch"
+                aria-label="Invite to Couch"
               >
-                <Share2 size={11} />
-                <span className="hidden xl:inline">INVITE</span>
+                <Share2 size={12} />
               </button>
 
               <button
                 type="button"
                 id="desktop-admin-console-btn"
                 onClick={() => setIsCommissionerOpen(true)}
-                className="touch-manipulation flex items-center gap-1 px-2 py-0.5 sm:px-2.5 sm:py-1 bg-[#1a2238] hover:bg-[#283554] border border-[#3b82f6]/60 hover:border-[#38bdf8] text-[#38bdf8] rounded-xs font-pixel text-[9px] sm:text-xs cursor-pointer shadow-xs shrink-0"
+                className="touch-manipulation w-7 h-7 flex items-center justify-center bg-[#1a2238] hover:bg-[#283554] border border-[#3b82f6]/60 hover:border-[#38bdf8] text-[#38bdf8] rounded-xs cursor-pointer shadow-xs shrink-0 active:scale-95"
                 title="Master Admin Console (Manage Couches, Squads & ESPN Data Sync)"
+                aria-label="Master Admin Console"
               >
-                <ShieldAlert size={12} className="text-[#38bdf8]" />
-                <span className="hidden sm:inline font-bold">ADMIN</span>
+                <ShieldAlert size={13} className="text-[#38bdf8]" />
               </button>
 
               <button
+                type="button"
                 onClick={() => setIsRulesModalOpen(true)}
-                className="touch-manipulation w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center bg-[#1a2238] text-[#fde047] border border-[#273552] rounded-xs cursor-pointer shrink-0"
+                className="touch-manipulation px-2 py-1 flex items-center gap-1 bg-[#1a2238] hover:bg-[#283554] text-[#fde047] border border-[#273552] rounded-xs cursor-pointer shrink-0 active:scale-95 font-pixel text-[9px] sm:text-xs"
                 title="How Scoring Works"
+                aria-label="How Scoring Works"
               >
-                <HelpCircle size={13} />
+                <HelpCircle size={12} />
+                <span>RULES</span>
               </button>
             </div>
           </div>
         </header>
+
+        {/* Dedicated Family Household Squad Switcher Bar */}
+        <FamilySquadSwitcher
+          activeUserName={userName}
+          roomCode={roomCode}
+          squads={squadPillsData}
+          onSelectSquad={handleSelectSquad}
+          onCreateSquad={handleCreateSquad}
+          onDeleteSquad={handleDeleteSquad}
+          onOpenRoomModal={() => {
+            setTempRoomCode(roomCode);
+            setIsRoomModalOpen(true);
+          }}
+          isAddDrawerOpen={isAddSquadDrawerOpen}
+          onOpenAddDrawer={() => setIsAddSquadDrawerOpen(true)}
+          onCloseAddDrawer={() => setIsAddSquadDrawerOpen(false)}
+        />
 
         {toastMessage && (
           <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 pointer-events-none max-w-[90vw]">
@@ -2087,6 +2229,13 @@ export default function App() {
                 onLockedSlotAttempt={() => showToast('Lineup is LOCKED!')}
                 onInspectPlayer={(player) => setDetailedPlayer(player)}
                 onRequestCreateSquad={() => setIsAddSquadDrawerOpen(true)}
+                currentReceipt={currentReceipt}
+                onOpenReceipt={(rc) => setSelectedReceiptModal(rc)}
+                onOpenTrophyModal={() => setIsTrophyModalOpen(true)}
+                reactions={squadReactions[(userName || '').trim().toUpperCase()] || {}}
+                badges={squadBadges}
+                isBluffMode={isBluffMode}
+                onToggleBluffMode={handleToggleBluffMode}
               />
             )}
 
@@ -2107,6 +2256,13 @@ export default function App() {
                 onCommitUserName={(name) => setUserName(name.toUpperCase())}
                 onOpenPlayerDetail={(player) => setDetailedPlayer(player)}
                 onSelectSquad={handleSelectSquad}
+                receipts={trustReceipts}
+                onOpenReceipt={(rc) => setSelectedReceiptModal(rc)}
+                onOpenTrophyModal={() => setIsTrophyModalOpen(true)}
+                onOpenShowdown={(rivalName) => {
+                  setIsTrophyModalOpen(true);
+                }}
+                reactions={squadReactions}
               />
             )}
           </div>
@@ -2472,6 +2628,28 @@ export default function App() {
               </form>
             </div>
           </div>
+        )}
+
+        {selectedReceiptModal && (
+          <TrustReceiptModal
+            receipt={selectedReceiptModal}
+            onClose={() => setSelectedReceiptModal(null)}
+          />
+        )}
+
+        {isTrophyModalOpen && (
+          <GamificationTrophyModal
+            userName={userName}
+            roomCode={roomCode}
+            sport={currentSport}
+            badges={squadBadges}
+            receipts={trustReceipts}
+            roomRosters={roomRosters}
+            allPlayers={roster}
+            matches={matches}
+            onOpenReceipt={(rc) => setSelectedReceiptModal(rc)}
+            onClose={() => setIsTrophyModalOpen(false)}
+          />
         )}
 
         <CommissionerModal

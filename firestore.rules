@@ -62,6 +62,20 @@ service cloud.firestore {
       allow delete: if isValidId(lockId);
     }
 
+    // Social Trust Receipts (tamper-evident lock receipts)
+    match /trust_receipts/{receiptId} {
+      allow read: if true;
+      allow create, update: if isValidId(receiptId);
+      allow delete: if isValidId(receiptId);
+    }
+
+    // Squad Reactions & Social Banter
+    match /squad_reactions/{reactionId} {
+      allow read: if true;
+      allow create, update: if isValidId(reactionId);
+      allow delete: if isValidId(reactionId);
+    }
+
     // Test connection
     match /test/{testId} {
       allow read: if true;

@@ -14,6 +14,8 @@ interface SimpleRulesViewProps {
 }
 
 export const SimpleRulesView: React.FC<SimpleRulesViewProps> = ({ sport = 'nfl' }) => {
+  // Official Updated Rules: NO FIELD GOALS, NO BIG STOPS!
+  // Pure whole-number offense finger math: Touchdowns (+6), Scrimmage Yards (+1/10yds), Passing Yards (+1/25yds), 2-Point Play (+2)
   const nflTiles: ScoringTile[] = [
     {
       title: 'TOUCHDOWN',
@@ -23,72 +25,42 @@ export const SimpleRulesView: React.FC<SimpleRulesViewProps> = ({ sport = 'nfl' 
       icon: '🏈',
     },
     {
-      title: 'FIELD GOAL',
-      points: '+3 PTS',
-      desc: 'Any successful field goal.',
-      badgeColor: 'bg-[#1d4ed8] text-white border-[#1e3a8a]',
-      icon: '🥅',
-    },
-    {
-      title: 'BIG STOP',
-      points: '+2 PTS',
-      desc: 'Sack, turnover, or stop.',
-      badgeColor: 'bg-[#b45309] text-white border-[#78350f]',
-      icon: '🛡️',
-    },
-    {
-      title: '10 YARDS',
+      title: '10 RUSH/REC YDS',
       points: '+1 PT',
-      desc: '+1 PT per 10 scrimmage yards.',
+      desc: '+1 PT for every 10 rushing or receiving yards.',
+      badgeColor: 'bg-[#1d4ed8] text-white border-[#1e3a8a]',
+      icon: '🏃‍♂️',
+    },
+    {
+      title: '25 PASSING YDS',
+      points: '+1 PT',
+      desc: '+1 PT for every 25 QB passing yards.',
       badgeColor: 'bg-[#7c3aed] text-white border-[#581c87]',
+      icon: '🎯',
+    },
+    {
+      title: '2-PT PLAY',
+      points: '+2 PTS',
+      desc: 'Bonus for a successful 2-point run or pass.',
+      badgeColor: 'bg-[#b45309] text-white border-[#78350f]',
       icon: '⚡',
     },
   ];
 
-  const nbaTiles: ScoringTile[] = [
-    {
-      title: '3-POINTER',
-      points: '+2 PTS',
-      desc: 'Splash from beyond the arc.',
-      badgeColor: 'bg-[#ea580c] text-white border-[#9a3412]',
-      icon: '🎯',
-    },
-    {
-      title: 'BIG STOP',
-      points: '+3 PTS',
-      desc: 'Steal or emphatic block.',
-      badgeColor: 'bg-[#b45309] text-white border-[#78350f]',
-      icon: '🛡️',
-    },
-    {
-      title: 'REBOUND',
-      points: '+1 PT',
-      desc: 'Board off the glass or rim.',
-      badgeColor: 'bg-[#15803d] text-white border-[#14532d]',
-      icon: '🏀',
-    },
-    {
-      title: 'ASSIST',
-      points: '+1 PT',
-      desc: 'Dish to a scoring teammate.',
-      badgeColor: 'bg-[#1d4ed8] text-white border-[#1e3a8a]',
-      icon: '👟',
-    },
-  ];
-
-  const scoringTiles = sport === 'nba' ? nbaTiles : nflTiles;
-
   return (
     <div className="w-full space-y-2.5 sm:space-y-3 animate-in fade-in duration-150">
-      <p className="text-center font-retro text-xs sm:text-sm text-[#fae5b8]/85">
-        {sport === 'nba'
-          ? 'Fast hardwood scoring! Plus +1 PT for every 3 real-world game points.'
-          : 'Easy whole-number points. Simple math on your fingers!'}
-      </p>
+      <div className="text-center space-y-0.5">
+        <p className="font-pixel text-[11px] sm:text-xs text-[#fde047] font-bold tracking-wide">
+          OFFENSE HEROES ONLY · WHOLE NUMBERS ONLY
+        </p>
+        <p className="font-retro text-xs sm:text-sm text-[#fae5b8]/85">
+          No field goals, no defense stops, no decimals! Easy math on your fingers.
+        </p>
+      </div>
 
-      {/* 2x2 Grid of Compact Non-Scrollable Retro Tiles */}
+      {/* 2x2 Grid of Compact Retro Tiles */}
       <div className="grid grid-cols-2 gap-2 sm:gap-3">
-        {scoringTiles.map((tile) => (
+        {nflTiles.map((tile) => (
           <div
             key={tile.title}
             className="pixel-box-cream p-2 sm:p-2.5 rounded-xs flex flex-col justify-between border-2 border-[#c99a57] shadow-[0_3px_0_0_#0a0f1d]"
@@ -123,11 +95,12 @@ export const SimpleRulesView: React.FC<SimpleRulesViewProps> = ({ sport = 'nfl' 
       </div>
 
       {/* Warm Retro Banner Across Bottom */}
-      <div className="pixel-box-cream p-2 sm:p-2.5 rounded-xs border-2 border-[#c99a57] shadow-xs text-center">
-        <p className="font-retro text-[11px] sm:text-xs text-[#5c3509] font-bold">
-          {sport === 'nba'
-            ? '💡 TIP: Zero position limits—pick any 3 superstars you want (e.g., 3 guards or 2 centers)!'
-            : '💡 TIP: Pick any 3 stars. No salary caps or position limits!'}
+      <div className="pixel-box-cream p-2 sm:p-2.5 rounded-xs border-2 border-[#c99a57] shadow-xs text-center space-y-1">
+        <p className="font-pixel text-[10px] sm:text-[11px] text-[#15803d] font-bold">
+          🚫 NO FIELD GOALS · 🚫 NO BIG STOPS
+        </p>
+        <p className="font-retro text-[11px] sm:text-xs text-[#5c3509]">
+          💡 Pick 3 stars (1 QB, 1 RB, 1 WR/TE). Root for touchdowns & big yards!
         </p>
       </div>
     </div>

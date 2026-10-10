@@ -147,23 +147,21 @@ export function setManualNFLWeek(weekNumber: number) {
 
 /**
  * Kid-friendly whole number Finger-Math points calculation for NFL
- * (Touchdowns = 6, Passing Yards = 1 pt per 25 yards, Scrimmage Yards = 1 pt per 10 yards, Field Goals = 3, Big Stops = 2)
+ * (Touchdowns = 6, Passing Yards = 1 pt per 25 yards, Scrimmage Yards = 1 pt per 10 yards. NO field goals, NO defense stops)
  */
 function calculateNFLPoints(
   tds: number = 0,
-  fgs: number = 0,
-  stops: number = 0,
+  _fgs: number = 0,
+  _stops: number = 0,
   pass_yds: number = 0,
   rush_yds: number = 0,
   rec_yds: number = 0
 ): number {
   const tdPts = (tds || 0) * 6;
-  const fgPts = (fgs || 0) * 3;
-  const defPts = (stops || 0) * 2;
   const passPts = Math.floor((pass_yds || 0) / 25);
   const rushPts = Math.floor((rush_yds || 0) / 10);
   const recPts = Math.floor((rec_yds || 0) / 10);
-  return tdPts + fgPts + defPts + passPts + rushPts + recPts;
+  return tdPts + passPts + rushPts + recPts;
 }
 
 /**

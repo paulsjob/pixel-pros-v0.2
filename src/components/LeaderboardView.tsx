@@ -1,9 +1,11 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
-import { Competitor, Match, SportId, UserProfile, UserRoster } from '../types';
+import { Competitor, Match, SportId, UserProfile, UserRoster, TrustReceipt } from '../types';
 import { PixelPlayerSprite } from './PixelPlayerSprite';
 import { PixelShieldIcon } from './PixelBadges';
 import { PixelHelmet } from './PixelHelmet';
-import { Users, Sparkles, ChevronLeft, ChevronRight, Trophy, ChevronDown, ChevronUp, Flame, CheckCircle2, ArrowRight, Crown } from 'lucide-react';
+import { Users, Sparkles, ChevronLeft, ChevronRight, Trophy, ChevronDown, ChevronUp, Flame, CheckCircle2, ArrowRight, Crown, ShieldCheck, Swords } from 'lucide-react';
+import { SquadReactionsBar } from './SquadReactionsBar';
+import { SquadReactionsMap } from '../lib/gamificationService';
 import { splitPlayerFirstLastName, formatPlayerInitialLastName, formatTeamPosSubtitle } from '../utils/formatters';
 import { getDeviceId } from '../lib/deviceIdentity';
 import { isGhostUser, getSquadLockState, fetchRoomRosters } from '../lib/supabaseClient';
@@ -56,6 +58,11 @@ interface LeaderboardViewProps {
   onSelectSquad?: (squadName: string) => void;
   onSwitchToPicks?: () => void;
   isGameRoomMode?: boolean;
+  receipts?: TrustReceipt[];
+  onOpenReceipt?: (receipt: TrustReceipt) => void;
+  onOpenTrophyModal?: () => void;
+  onOpenShowdown?: (rivalName: string) => void;
+  reactions?: SquadReactionsMap;
 }
 
 export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
@@ -74,6 +81,11 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
   onSelectSquad,
   onSwitchToPicks,
   isGameRoomMode = false,
+  receipts = [],
+  onOpenReceipt,
+  onOpenTrophyModal,
+  onOpenShowdown,
+  reactions = {},
 }) => {
   // Top-level View Mode: 'weekly' (default), 'season', 'game_slates', 'top_players'
   const [viewMode, setViewMode] = useState<'weekly' | 'season' | 'game_slates' | 'top_players'>('weekly');
@@ -687,6 +699,18 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
           <Sparkles size={13} className={viewMode === 'top_players' ? 'text-[#facc15]' : 'text-[#94a3b8]'} />
           <span className="truncate">TOP STARS</span>
         </button>
+
+        {onOpenTrophyModal && (
+          <button
+            type="button"
+            onClick={onOpenTrophyModal}
+            className="touch-manipulation py-1.5 sm:py-2 px-1 sm:px-2 font-pixel text-[9px] sm:text-xs rounded-xs border-2 border-[#b45309] bg-[#d97706] hover:bg-[#b45309] text-white cursor-pointer transition-all flex items-center justify-center gap-1 sm:gap-1.5 font-bold shadow-[0_2px_0_0_#78350f] active:translate-y-0.5"
+            title="Open Trophy Cabinet, Lock Audit & Social Trust Hub"
+          >
+            <Trophy size={13} className="text-[#fde047]" />
+            <span className="truncate">TROPHIES & TRUST</span>
+          </button>
+        )}
       </div>
 
       {/* VIEW MODE A: THIS WEEK'S MULTI-GAME PODIUM LEADERBOARD */}
@@ -1286,7 +1310,60 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
                           })}
                         </div>
 
-                        {/* In MEGA_TOTAL: Game Slates Breakdown list */}
+                        {/* Social Trust Receipt & Showdown Action Buttons */}
+                        <div className="mt-2 pt-2 border-t border-current/20 flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {(() => {
+                              const rc = receipts.find(
+                                (r) =>
+                                  (r.user_name || '').trim().toUpperCase() === entry.userName.trim().toUpperCase()
+                              );
+                              if (rc && onOpenReceipt) {
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={() => onOpenReceipt(rc)}
+                                    className="touch-manipulation px-2 py-1 bg-[#065f46] hover:bg-[#047857] text-[#a7f3d0] border border-[#10b981]/50 rounded-2xs font-pixel text-[8px] sm:text-[9px] font-bold flex items-center gap-1 cursor-pointer active:scale-95 shadow-2xs"
+                                    title="View tamper-evident official lock receipt"
+                                  >
+                                    <ShieldCheck size={11} className="text-[#34d399]" />
+                                    <span>RECEIPT #{rc.receipt_id}</span>
+                                  </button>
+                                );
+                              }
+                              return entry.isLocked ? (
+                                <span className="font-pixel text-[8px] text-[#34d399] bg-[#064e3b]/50 px-2 py-0.5 rounded-2xs border border-[#059669]">
+                                  🔒 LOCKED & VERIFIED
+                                </span>
+                              ) : null;
+                            })()}
+
+                            {onOpenShowdown && !entry.isYou && (
+                              <button
+                                type="button"
+                                onClick={() => onOpenShowdown(entry.userName)}
+                                className="touch-manipulation px-2 py-1 bg-[#b91c1c] hover:bg-[#dc2626] text-white border border-[#ef4444] rounded-2xs font-pixel text-[8px] sm:text-[9px] font-bold flex items-center gap-1 cursor-pointer active:scale-95 shadow-2xs"
+                                title={`Head-to-head showdown against ${entry.userName}`}
+                              >
+                                <Swords size={11} />
+                                <span>VS SHOWDOWN</span>
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Banter Reaction Bar for this squad */}
+                          <div className="flex items-center gap-1">
+                            <span className="font-pixel text-[8px] opacity-75 hidden sm:inline">BANTER:</span>
+                            <SquadReactionsBar
+                              roomCode={roomCode}
+                              targetUser={entry.userName}
+                              currentUser={userName}
+                              sport={sport}
+                              reactions={reactions?.[entry.userName]}
+                              compact={true}
+                            />
+                          </div>
+                        </div>
                         {leagueSlateFilter === 'MEGA_TOTAL' && entry.slateBreakdowns && entry.slateBreakdowns.length > 0 && (
                           <div className="mt-2.5 pt-2 border-t border-current/15">
                             <div className="font-pixel text-[9px] sm:text-[10px] font-bold mb-1.5 opacity-90">

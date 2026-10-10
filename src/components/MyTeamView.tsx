@@ -1,8 +1,9 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react';
-import { Competitor, ActiveSlot, SquadSlots, Match, SportId } from '../types';
+import { Competitor, ActiveSlot, SquadSlots, Match, SportId, TrustReceipt, AchievementBadge, SquadReactionEntry } from '../types';
 import { PixelPlayerSprite } from './PixelPlayerSprite';
 import { PixelHelmet } from './PixelHelmet';
-import { Sparkles, X, ChevronLeft, ChevronRight, HelpCircle, CheckCircle2, ListFilter } from 'lucide-react';
+import { Sparkles, X, ChevronLeft, ChevronRight, HelpCircle, CheckCircle2, ListFilter, ShieldCheck, Trophy, Eye, EyeOff } from 'lucide-react';
+import { SquadReactionsBar } from './SquadReactionsBar';
 import { splitPlayerFirstLastName } from '../utils/formatters';
 import {
   formatRealtimeGameSituationCompact,
@@ -44,6 +45,13 @@ interface MyTeamViewProps {
   onSwitchToStandings?: () => void;
   squads?: Array<{ name: string; isComplete: boolean; isLocked: boolean; isCurrent: boolean }>;
   onSelectSquad?: (squadName: string) => void;
+  currentReceipt?: TrustReceipt | null;
+  onOpenReceipt?: (receipt: TrustReceipt) => void;
+  onOpenTrophyModal?: () => void;
+  reactions?: Record<string, SquadReactionEntry[]>;
+  badges?: AchievementBadge[];
+  isBluffMode?: boolean;
+  onToggleBluffMode?: () => void;
 }
 
 export const MyTeamView: React.FC<MyTeamViewProps> = ({
@@ -71,6 +79,13 @@ export const MyTeamView: React.FC<MyTeamViewProps> = ({
   onSwitchToStandings,
   squads = [],
   onSelectSquad,
+  currentReceipt,
+  onOpenReceipt,
+  onOpenTrophyModal,
+  reactions = {},
+  badges = [],
+  isBluffMode = false,
+  onToggleBluffMode,
 }) => {
   const slotDefs = sport === 'nba' ? NBA_SLOT_DEFS : NFL_SLOT_DEFS;
   const isEmptySquadState = !userName || !userName.trim();
@@ -222,35 +237,15 @@ export const MyTeamView: React.FC<MyTeamViewProps> = ({
       {/* Centered Hero Focus: 3 Star Podiums */}
       <div className="pixel-box-cream p-2 sm:p-4 md:p-6 rounded-xs w-full shadow-[0_8px_0_0_#0a0f1d] border-4 border-[#1a2238] box-border">
         
-        {/* Clean Header Bar: Squad Title on Left with Household Profile Switcher, Single All Games Jump on Right */}
-        <div className="flex items-center justify-between border-b-2 border-[#d4a86a] pb-1.5 mb-2 gap-2 flex-wrap">
-          <div className="font-pixel text-[11px] sm:text-sm text-[#5c3509] tracking-wider uppercase flex items-center gap-1.5 min-w-0 flex-1 truncate">
+        {/* Clean Header Bar: Slate Title on Left, Single All Games Jump on Right */}
+        <div className="flex items-center justify-between border-b-2 border-[#d4a86a] pb-1.5 mb-2 gap-2">
+          <div className="font-pixel text-[11px] sm:text-sm text-[#5c3509] tracking-wider uppercase flex items-center gap-1.5 min-w-0 truncate">
             <Sparkles size={13} className="text-[#b45309] shrink-0" />
             <span className="truncate">
               {isSuperstars
-                ? '⭐ SUPERSTARS'
+                ? '⭐ WEEKLY SUPERSTARS'
                 : `${currentSlate.id} PICKS`}
             </span>
-            {userName && (
-              <div className="inline-flex items-center gap-1 ml-1 shrink-0">
-                {squads && squads.length > 1 ? (
-                  <select
-                    value={userName.toUpperCase()}
-                    onChange={(e) => onSelectSquad?.(e.target.value)}
-                    className="font-pixel text-[9px] sm:text-xs bg-[#ebd2a4] hover:bg-[#fae9c8] text-[#5c3509] border border-[#c99a57] rounded-xs px-1.5 py-0.5 cursor-pointer uppercase font-bold focus:outline-none"
-                    title="Switch active household squad"
-                  >
-                    {squads.map((sq) => (
-                      <option key={sq.name} value={sq.name.toUpperCase()}>
-                        {sq.name.toUpperCase()} {sq.isLocked ? '🔒' : ''}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <span className="text-[#784610] font-bold truncate">· {userName.toUpperCase()}</span>
-                )}
-              </div>
-            )}
           </div>
 
           {/* Single Clean All Slates Jump Button */}
@@ -812,12 +807,36 @@ export const MyTeamView: React.FC<MyTeamViewProps> = ({
       {!isEmptySquadState && (
         <div className="mt-2 md:mt-4 w-full box-border">
           {hasThreeDistinct && effectiveIsLocked ? (
-            <div className="w-full px-2.5 py-1.5 md:px-6 md:py-3.5 bg-[#1e293b] text-[#f1f5f9] border-2 md:border-3 border-[#334155] shadow-[0_2px_0_0_#0f172a] md:shadow-[0_4px_0_0_#0f172a] rounded-xs flex items-center justify-between gap-2 md:gap-4 box-border">
-              <div className="flex items-center gap-1.5 md:gap-2 min-w-0">
-                <span className="font-pixel text-[10px] md:text-xs text-[#cbd5e1] font-bold tracking-wider truncate flex items-center gap-1.5 md:gap-2">
+            <div className="w-full px-2.5 py-1.5 md:px-6 md:py-3.5 bg-[#1e293b] text-[#f1f5f9] border-2 md:border-3 border-[#334155] shadow-[0_2px_0_0_#0f172a] md:shadow-[0_4px_0_0_#0f172a] rounded-xs flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 md:gap-4 box-border">
+              <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                <span className="font-pixel text-[10px] md:text-xs text-[#cbd5e1] font-bold tracking-wider truncate flex items-center gap-1.5">
                   <span className="text-xs md:text-sm select-none">🔒</span>
                   <span>[ SQUAD LOCKED ]</span>
                 </span>
+                {currentReceipt && onOpenReceipt && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenReceipt(currentReceipt)}
+                    className="touch-manipulation px-2 py-0.5 bg-[#065f46] hover:bg-[#047857] text-[#6ee7b7] border border-[#10b981]/60 rounded-2xs font-pixel text-[8px] md:text-[9px] font-bold flex items-center gap-1 cursor-pointer active:scale-95 shadow-2xs"
+                    title="View tamper-evident official lock receipt"
+                  >
+                    <span>📜 RECEIPT #{currentReceipt.receipt_id}</span>
+                  </button>
+                )}
+                {onToggleBluffMode && (
+                  <button
+                    type="button"
+                    onClick={onToggleBluffMode}
+                    className={`touch-manipulation px-2 py-0.5 rounded-2xs font-pixel text-[8px] md:text-[9px] font-bold flex items-center gap-1 cursor-pointer transition-all ${
+                      isBluffMode
+                        ? 'bg-[#431407] text-[#fdba74] border border-[#ea580c]'
+                        : 'bg-[#1a2238] text-[#94a3b8] hover:text-[#fae5b8] border border-[#273552]'
+                    }`}
+                    title="Bluff Mode: Hides your picks from family rivals until kickoff"
+                  >
+                    <span>{isBluffMode ? '🕵️ BLUFF: ON' : '🕵️ BLUFF: OFF'}</span>
+                  </button>
+                )}
               </div>
               {(onUnlockSquad || onToggleLock) && (
                 <button
@@ -903,6 +922,23 @@ export const MyTeamView: React.FC<MyTeamViewProps> = ({
               </span>
             </button>
           )}
+
+          {/* Household Banter Reaction Bar */}
+          <div className="mt-2.5 p-2 bg-[#ecd7ab]/80 border-2 border-[#c99a57] rounded-xs flex flex-wrap items-center justify-between gap-1.5 shadow-inner">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs select-none">💬</span>
+              <span className="font-pixel text-[9px] sm:text-[10px] text-[#78350f] font-bold uppercase">
+                COUCH BANTER & STICKERS:
+              </span>
+            </div>
+            <SquadReactionsBar
+              roomCode={roomCode}
+              targetUser={userName}
+              currentUser={userName}
+              sport={sport}
+              reactions={reactions}
+            />
+          </div>
         </div>
       )}
 

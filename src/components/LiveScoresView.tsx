@@ -388,11 +388,11 @@ export const LiveScoresView: React.FC<LiveScoresViewProps> = ({
                   <button
                     onClick={() => {
                       const p = sortedCompetitors[2] || competitors[0];
-                      if (p) onSimulatePlay(p, '48 YD FIELD GOAL (+3 PTS)', 3);
+                      if (p) onSimulatePlay(p, 'SUCCESSFUL 2-PT CONVERSION (+2 PTS)', 2);
                     }}
                     className="touch-manipulation px-2.5 py-1.5 bg-[#ca8a04] hover:bg-[#a16207] text-white font-pixel text-[10px] rounded-xs border border-[#713f12] cursor-pointer active:translate-y-0.5"
                   >
-                    +3 FIELD GOAL
+                    +2 2-PT PLAY
                   </button>
                 </div>
               </div>
