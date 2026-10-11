@@ -71,6 +71,17 @@ export interface UserLeagueStats {
   highGameSlate: string;
 }
 
+export interface UserRosterSection {
+  id: string;
+  title: string;
+  subtitle?: string;
+  isGameSlate: boolean;
+  slateKey?: string;
+  totalPoints: number;
+  statusBadge: string;
+  stars: Array<{ slotLabel: string; player: Competitor; score: number }>;
+}
+
 export const CentralLeagueLeaderboard: React.FC<CentralLeagueLeaderboardProps> = ({
   roomCode,
   userName,
@@ -125,43 +136,6 @@ export const CentralLeagueLeaderboard: React.FC<CentralLeagueLeaderboardProps> =
     return sortMatchesByKickoffAndStatus(filtered.length > 0 ? filtered : matches);
   }, [allSeasonMatches, selectedWeek, matches]);
 
-  const getUserStars = useCallback(
-    (uName: string) => {
-      const norm = (uName || '').trim().toUpperCase();
-      // First check for specific week superstar roster
-      let superRoster = (roomRosters || []).find((r) => {
-        const p = parseLeagueIdentity(r.room_code || '');
-        return (
-          p.baseLeague === cleanRoom &&
-          !p.isGameSlate &&
-          p.weekNumber === selectedWeek &&
-          (r.user_name || '').trim().toUpperCase() === norm
-        );
-      });
-      // Fallback to room base roster without week suffix
-      if (!superRoster) {
-        superRoster = (roomRosters || []).find((r) => {
-          const p = parseLeagueIdentity(r.room_code || '');
-          return (
-            p.baseLeague === cleanRoom &&
-            (!p.isGameSlate || r.room_code === cleanRoom) &&
-            (r.user_name || '').trim().toUpperCase() === norm
-          );
-        });
-      }
-      if (!superRoster) return [];
-      const s1 = resolveCompetitorById(superRoster.star_1_id, competitors, null, sport);
-      const s2 = resolveCompetitorById(superRoster.star_2_id, competitors, null, sport);
-      const s3 = resolveCompetitorById(superRoster.star_3_id, competitors, null, sport);
-      return [
-        { slotLabel: 'QB', player: s1 },
-        { slotLabel: 'RB', player: s2 },
-        { slotLabel: 'WR/TE', player: s3 },
-      ].filter((x) => Boolean(x.player)) as Array<{ slotLabel: string; player: Competitor }>;
-    },
-    [roomRosters, cleanRoom, competitors, sport, selectedWeek]
-  );
-
   const toggleExpandGame = (slateKey: string) => {
     setExpandedGames((prev) => ({ ...prev, [slateKey]: !prev[slateKey] }));
   };
@@ -181,6 +155,131 @@ export const CentralLeagueLeaderboard: React.FC<CentralLeagueLeaderboardProps> =
     }
     return 0;
   };
+
+  // Inspect ALL rosters entered by a user for selectedWeek (Superstars + Game Slates)
+  const getUserWeekRosterSections = useCallback(
+    (uName: string): UserRosterSection[] => {
+      const norm = (uName || '').trim().toUpperCase();
+      if (!norm) return [];
+
+      const sections: UserRosterSection[] = [];
+
+      // 1. Weekly Superstars Contest
+      let superRoster = (roomRosters || []).find((r) => {
+        const p = parseLeagueIdentity(r.room_code || '');
+        return (
+          p.baseLeague === cleanRoom &&
+          !p.isGameSlate &&
+          p.weekNumber === selectedWeek &&
+          (r.user_name || '').trim().toUpperCase() === norm
+        );
+      });
+      if (!superRoster) {
+        superRoster = (roomRosters || []).find((r) => {
+          const p = parseLeagueIdentity(r.room_code || '');
+          return (
+            p.baseLeague === cleanRoom &&
+            (!p.isGameSlate || r.room_code === cleanRoom) &&
+            (r.user_name || '').trim().toUpperCase() === norm
+          );
+        });
+      }
+
+      if (superRoster) {
+        const s1 = resolveCompetitorById(superRoster.star_1_id, competitors, null, sport);
+        const s2 = resolveCompetitorById(superRoster.star_2_id, competitors, null, sport);
+        const s3 = resolveCompetitorById(superRoster.star_3_id, competitors, null, sport);
+        const starSlots = [
+          { slotLabel: 'QB', player: s1 },
+          { slotLabel: 'RB', player: s2 },
+          { slotLabel: 'WR/TE', player: s3 },
+        ].filter((x) => Boolean(x.player)) as Array<{ slotLabel: string; player: Competitor }>;
+
+        if (starSlots.length > 0) {
+          const starsWithScores = starSlots.map((item) => ({
+            slotLabel: item.slotLabel,
+            player: item.player,
+            score: getPlayerLivePoints(item.player),
+          }));
+          const totalPts = starsWithScores.reduce((sum, s) => sum + s.score, 0);
+
+          sections.push({
+            id: 'superstars',
+            title: `WEEK ${selectedWeek} SUPERSTARS`,
+            subtitle: '3-Star Weekly Contest',
+            isGameSlate: false,
+            totalPoints: totalPts,
+            statusBadge: totalPts > 0 ? `${totalPts} PTS` : 'ACTIVE PICKS',
+            stars: starsWithScores,
+          });
+        }
+      }
+
+      // 2. All Game Slates in Week {selectedWeek} that this user entered
+      weekMatches.forEach((m) => {
+        const awayCode = (m.awayTeamCode || m.away_team || '').trim().toUpperCase();
+        const homeCode = (m.homeTeamCode || m.home_team || '').trim().toUpperCase();
+        const targetSlate = `${awayCode}_${homeCode}`;
+
+        const slateRoster = (roomRosters || []).find((r) => {
+          const parsed = parseLeagueIdentity(r.room_code || '');
+          if (parsed.baseLeague !== cleanRoom) return false;
+          if (!parsed.isGameSlate) return false;
+          if (parsed.slateMatchup !== targetSlate) return false;
+          if (parsed.weekNumber != null && parsed.weekNumber !== selectedWeek) return false;
+          return (r.user_name || '').trim().toUpperCase() === norm;
+        });
+
+        if (slateRoster) {
+          let s1 = resolveCompetitorById(slateRoster.star_1_id, competitors, null, sport);
+          let s2 = resolveCompetitorById(slateRoster.star_2_id, competitors, null, sport);
+          let s3 = resolveCompetitorById(slateRoster.star_3_id, competitors, null, sport);
+
+          const isPlayerInGame = (p: Competitor | null) => {
+            if (!p) return false;
+            const pTeam = (p.teamCode || (p as any).team || '').trim().toUpperCase();
+            return pTeam === awayCode || pTeam === homeCode;
+          };
+          if (s1 && !isPlayerInGame(s1)) s1 = null;
+          if (s2 && !isPlayerInGame(s2)) s2 = null;
+          if (s3 && !isPlayerInGame(s3)) s3 = null;
+
+          const validStars = [s1, s2, s3].filter(Boolean) as Competitor[];
+          if (validStars.length > 0) {
+            const starsWithScores = validStars.map((p, idx) => ({
+              slotLabel: p.position || `STAR ${idx + 1}`,
+              player: p,
+              score: getPlayerLivePoints(p, m),
+            }));
+            const totalPts = starsWithScores.reduce((sum, s) => sum + s.score, 0);
+
+            const isFinal = isMatchEnded(m);
+            const isLive = m.status === 'live';
+            let statusText = 'UPCOMING';
+            if (isFinal) {
+              statusText = `FINAL: ${m.awayScore ?? m.away_score ?? 0} - ${m.homeScore ?? m.home_score ?? 0}`;
+            } else if (isLive) {
+              statusText = `LIVE: ${m.periodLabel || m.quarterTime || 'IN PROGRESS'}`;
+            }
+
+            sections.push({
+              id: `slate_${targetSlate}`,
+              title: `${awayCode} @ ${homeCode}`,
+              subtitle: statusText,
+              isGameSlate: true,
+              slateKey: `${awayCode}@${homeCode}`,
+              totalPoints: totalPts,
+              statusBadge: `${totalPts} PTS`,
+              stars: starsWithScores,
+            });
+          }
+        }
+      });
+
+      return sections;
+    },
+    [roomRosters, cleanRoom, competitors, sport, selectedWeek, weekMatches]
+  );
 
   // 1. Compute Game Podiums for every match on selected week schedule
   const gamePodiums: GamePodiumData[] = useMemo(() => {
@@ -496,6 +595,74 @@ export const CentralLeagueLeaderboard: React.FC<CentralLeagueLeaderboardProps> =
     return { winsStandings, pointsStandings, championLeader };
   }, [cleanRoom, activeNormalizedName, roomRosters, competitors, sport, gamePodiums, selectedWeek]);
 
+  // Olympic-style accurate ranking with tie detection
+  const pointsRankMap = useMemo(() => {
+    const map: Record<string, { rank: number; isTied: boolean; displayRank: string }> = {};
+    let currentRank = 1;
+    for (let i = 0; i < pointsStandings.length; i++) {
+      const curr = pointsStandings[i];
+      if (i > 0) {
+        const prev = pointsStandings[i - 1];
+        const sameScore = curr.totalPoints === prev.totalPoints && curr.totalWins === prev.totalWins;
+        if (!sameScore) {
+          currentRank = i + 1;
+        }
+      }
+      const isTiedWithPrev =
+        i > 0 &&
+        pointsStandings[i - 1].totalPoints === curr.totalPoints &&
+        pointsStandings[i - 1].totalWins === curr.totalWins;
+      const isTiedWithNext =
+        i + 1 < pointsStandings.length &&
+        pointsStandings[i + 1].totalPoints === curr.totalPoints &&
+        pointsStandings[i + 1].totalWins === curr.totalWins;
+      const isTied = Boolean(isTiedWithPrev || isTiedWithNext);
+
+      map[curr.userName] = {
+        rank: currentRank,
+        isTied,
+        displayRank: isTied ? `T-${currentRank}` : `${currentRank}`,
+      };
+    }
+    return map;
+  }, [pointsStandings]);
+
+  const winsRankMap = useMemo(() => {
+    const map: Record<string, { rank: number; isTied: boolean; displayRank: string }> = {};
+    let currentRank = 1;
+    for (let i = 0; i < winsStandings.length; i++) {
+      const curr = winsStandings[i];
+      if (i > 0) {
+        const prev = winsStandings[i - 1];
+        const sameWins =
+          curr.totalWins === prev.totalWins &&
+          curr.outrightWins === prev.outrightWins &&
+          curr.totalPoints === prev.totalPoints;
+        if (!sameWins) {
+          currentRank = i + 1;
+        }
+      }
+      const isTiedWithPrev =
+        i > 0 &&
+        winsStandings[i - 1].totalWins === curr.totalWins &&
+        winsStandings[i - 1].outrightWins === curr.outrightWins &&
+        winsStandings[i - 1].totalPoints === curr.totalPoints;
+      const isTiedWithNext =
+        i + 1 < winsStandings.length &&
+        winsStandings[i + 1].totalWins === curr.totalWins &&
+        winsStandings[i + 1].outrightWins === curr.outrightWins &&
+        winsStandings[i + 1].totalPoints === curr.totalPoints;
+      const isTied = Boolean(isTiedWithPrev || isTiedWithNext);
+
+      map[curr.userName] = {
+        rank: currentRank,
+        isTied,
+        displayRank: isTied ? `T-${currentRank}` : `${currentRank}`,
+      };
+    }
+    return map;
+  }, [winsStandings]);
+
   const filteredGames = useMemo(() => {
     if (filterMode === 'live_final') {
       return gamePodiums.filter((g) => g.isFinal || g.isLive);
@@ -591,11 +758,16 @@ export const CentralLeagueLeaderboard: React.FC<CentralLeagueLeaderboardProps> =
             </div>
           ) : (
             pointsStandings.map((st, idx) => {
-              const isFirst = idx === 0 && st.totalPoints > 0;
-              const isSecond = idx === 1 && st.totalPoints > 0;
-              const isThird = idx === 2 && st.totalPoints > 0;
+              const rInfo = pointsRankMap[st.userName] || {
+                rank: idx + 1,
+                isTied: false,
+                displayRank: `${idx + 1}`,
+              };
+              const isFirst = rInfo.rank === 1 && st.totalPoints > 0;
+              const isSecond = rInfo.rank === 2 && st.totalPoints > 0;
+              const isThird = rInfo.rank === 3 && st.totalPoints > 0;
               const isExpanded = expandedStandingsUser === st.userName;
-              const squadStars = isExpanded ? getUserStars(st.userName) : [];
+              const rosterSections = isExpanded ? getUserWeekRosterSections(st.userName) : [];
 
               return (
                 <div
@@ -632,7 +804,7 @@ export const CentralLeagueLeaderboard: React.FC<CentralLeagueLeaderboardProps> =
                             : 'bg-[#ebd2a4] text-[#784610] border-[#c99a57]'
                         }`}
                       >
-                        {isFirst ? '🥇' : isSecond ? '🥈' : isThird ? '🥉' : `${idx + 1}`}
+                        {isFirst ? '🥇' : isSecond ? '🥈' : isThird ? '🥉' : rInfo.displayRank}
                       </div>
 
                       <div className="min-w-0">
@@ -646,17 +818,26 @@ export const CentralLeagueLeaderboard: React.FC<CentralLeagueLeaderboardProps> =
                             </span>
                           )}
                           {isFirst && (
-                            <span className="text-xs select-none">👑</span>
+                            <span className="text-xs select-none" title={rInfo.isTied ? 'Tied Leader' : 'Sole Leader'}>
+                              👑
+                            </span>
+                          )}
+                          {rInfo.isTied && (
+                            <span className="font-pixel text-[8px] bg-[#facc15] text-[#713f12] px-1 py-0.2 rounded-2xs font-bold shrink-0">
+                              TIED
+                            </span>
                           )}
                         </div>
                         <div className="font-sans text-[11px] sm:text-xs font-medium truncate mt-0.5 opacity-90">
                           {isFirst
-                            ? '🏆 Leading the Couch!'
+                            ? rInfo.isTied
+                              ? '🏆 Tied for 1st on the Couch!'
+                              : '🏆 Leading the Couch!'
                             : st.pointsBehind > 0
                             ? `${st.pointsBehind} pts behind 1st place`
                             : 'Tied for 1st place!'}
                           <span className="ml-1 text-[10px] opacity-75 font-normal">
-                            · {isExpanded ? 'Tap to close roster ▲' : 'Tap to view roster ▼'}
+                            · {isExpanded ? 'Tap to close roster ▲' : 'Tap to view picks ▼'}
                           </span>
                         </div>
                       </div>
@@ -682,11 +863,11 @@ export const CentralLeagueLeaderboard: React.FC<CentralLeagueLeaderboardProps> =
 
                   {/* Expandable Roster Inspection Drawer */}
                   {isExpanded && (
-                    <div className="p-2.5 sm:p-3 bg-[#0a1226] text-[#fae5b8] border-t-2 border-[#1e293b] space-y-2 animate-in fade-in duration-150">
+                    <div className="p-2.5 sm:p-3 bg-[#0a1226] text-[#fae5b8] border-t-2 border-[#1e293b] space-y-3 animate-in fade-in duration-150">
                       <div className="flex items-center justify-between pb-1.5 border-b border-[#1e293b]">
                         <span className="font-pixel text-[9px] sm:text-[10px] text-[#93c5fd] font-bold tracking-wider uppercase flex items-center gap-1">
                           <Users size={12} className="text-[#38bdf8]" />
-                          <span>{st.userName}&apos;S WEEK {selectedWeek} ROSTER</span>
+                          <span>{st.userName}&apos;S WEEK {selectedWeek} PICKS & BREAKDOWN</span>
                         </span>
                         {st.isYou && onSwitchToPicks && (
                           <button
@@ -702,56 +883,77 @@ export const CentralLeagueLeaderboard: React.FC<CentralLeagueLeaderboardProps> =
                         )}
                       </div>
 
-                      {squadStars.length === 0 ? (
+                      {rosterSections.length === 0 ? (
                         <div className="py-3 text-center font-sans text-xs text-[#94a3b8]">
-                          No superstar picks submitted for this week yet.
+                          No picks submitted for Week {selectedWeek} yet.
                         </div>
                       ) : (
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                          {squadStars.map(({ slotLabel, player }) => {
-                            const pScore = getPlayerLivePoints(player);
-                            return (
-                              <div
-                                key={player.id}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onOpenPlayerDetail?.(player);
-                                }}
-                                className="p-2 bg-[#121c38] hover:bg-[#1a2950] border border-[#273860] hover:border-[#38bdf8] rounded-xs cursor-pointer transition-all flex items-center justify-between gap-2 shadow-xs"
-                                title={`Tap to view full scout card for ${player.displayName}`}
-                              >
-                                <div className="flex items-center gap-2 min-w-0">
-                                  {player.teamCode ? (
-                                    <PixelHelmet teamCode={player.teamCode} size={22} className="shrink-0" />
-                                  ) : (
-                                    <span className="text-base select-none shrink-0">⭐</span>
+                        <div className="space-y-2.5">
+                          {rosterSections.map((section) => (
+                            <div key={section.id} className="p-2.5 bg-[#0d172e] border border-[#1e2e4a] rounded-xs space-y-2">
+                              {/* Section Title & Subtotal */}
+                              <div className="flex items-center justify-between pb-1 border-b border-[#1b2b45] text-[10px]">
+                                <span className="font-pixel text-[#fde047] font-bold flex items-center gap-1 truncate">
+                                  {section.isGameSlate ? '🏈' : '⭐'} {section.title}
+                                  {section.subtitle && (
+                                    <span className="font-sans text-[#94a3b8] font-normal text-[9px] ml-1">
+                                      ({section.subtitle})
+                                    </span>
                                   )}
-                                  <div className="min-w-0">
-                                    <div className="font-sans text-[10px] text-[#38bdf8] font-bold uppercase tracking-wider">
-                                      {slotLabel} · {player.position}
+                                </span>
+                                <span className="font-pixel text-[#38bdf8] font-bold shrink-0 ml-2">
+                                  {section.totalPoints} PTS
+                                </span>
+                              </div>
+
+                              {/* Star Cards Grid */}
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                {section.stars.map(({ slotLabel, player, score }) => (
+                                  <div
+                                    key={`${section.id}_${player.id}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onOpenPlayerDetail?.(player);
+                                    }}
+                                    className="p-2 bg-[#121c38] hover:bg-[#1a2950] border border-[#273860] hover:border-[#38bdf8] rounded-xs cursor-pointer transition-all flex items-center justify-between gap-2 shadow-xs"
+                                    title={`Tap to view full scout card for ${player.displayName}`}
+                                  >
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      {player.teamCode ? (
+                                        <PixelHelmet teamCode={player.teamCode} size={22} className="shrink-0" />
+                                      ) : (
+                                        <span className="text-base select-none shrink-0">⭐</span>
+                                      )}
+                                      <div className="min-w-0">
+                                        <div className="font-sans text-[10px] text-[#38bdf8] font-bold uppercase tracking-wider">
+                                          {slotLabel} · {player.position}
+                                        </div>
+                                        <div className="font-pixel text-[10px] text-white font-bold truncate">
+                                          {player.shortName || player.displayName}
+                                        </div>
+                                        <div className="font-sans text-[10px] text-[#94a3b8] truncate">
+                                          {player.teamCode}
+                                        </div>
+                                      </div>
                                     </div>
-                                    <div className="font-pixel text-[10px] text-white font-bold truncate">
-                                      {player.shortName || player.displayName}
-                                    </div>
-                                    <div className="font-sans text-[10px] text-[#94a3b8] truncate">
-                                      {player.teamCode}
+                                    <div className="text-right shrink-0">
+                                      <span className="font-pixel text-[11px] text-[#facc15] font-bold block">
+                                        {score} PTS
+                                      </span>
                                     </div>
                                   </div>
-                                </div>
-                                <div className="text-right shrink-0">
-                                  <span className="font-pixel text-[11px] text-[#facc15] font-bold block">
-                                    {pScore} PTS
-                                  </span>
-                                </div>
+                                ))}
                               </div>
-                            );
-                          })}
+                            </div>
+                          ))}
                         </div>
                       )}
 
                       <div className="pt-1 flex items-center justify-between text-[10px] font-sans text-[#64748b]">
-                        <span>Tap any superstar to inspect game log & stats</span>
-                        <span className="font-bold text-[#94a3b8]">{st.gamesPlayed} games played</span>
+                        <span>Tap any player to inspect scout card</span>
+                        <span className="font-bold text-[#94a3b8]">
+                          {st.gamesPlayed} games played · {st.totalPoints} total pts
+                        </span>
                       </div>
                     </div>
                   )}
@@ -789,7 +991,8 @@ export const CentralLeagueLeaderboard: React.FC<CentralLeagueLeaderboardProps> =
                   </div>
                 ) : (
                   winsStandings.map((st, idx) => {
-                    const isFirst = idx === 0 && st.totalWins > 0;
+                    const rInfo = winsRankMap[st.userName] || { rank: idx + 1, isTied: false, displayRank: `${idx + 1}` };
+                    const isFirst = rInfo.rank === 1 && st.totalWins > 0;
                     return (
                       <div
                         key={st.userName}
@@ -811,7 +1014,7 @@ export const CentralLeagueLeaderboard: React.FC<CentralLeagueLeaderboardProps> =
                                 : 'bg-[#ebd2a4] text-[#784610] border-[#c99a57]'
                             }`}
                           >
-                            {isFirst ? '👑' : `${idx + 1}`}
+                            {isFirst ? '👑' : rInfo.displayRank}
                           </div>
 
                           <div className="min-w-0">
@@ -822,6 +1025,11 @@ export const CentralLeagueLeaderboard: React.FC<CentralLeagueLeaderboardProps> =
                               {st.isYou && (
                                 <span className="font-pixel text-[8px] bg-[#38bdf8] text-[#082f49] px-1 py-0.2 rounded-2xs font-bold shrink-0">
                                   YOU
+                                </span>
+                              )}
+                              {rInfo.isTied && (
+                                <span className="font-pixel text-[7px] bg-[#facc15] text-[#713f12] px-1 py-0.2 rounded-2xs font-bold shrink-0">
+                                  TIED
                                 </span>
                               )}
                             </div>
@@ -871,7 +1079,8 @@ export const CentralLeagueLeaderboard: React.FC<CentralLeagueLeaderboardProps> =
                   </div>
                 ) : (
                   pointsStandings.map((st, idx) => {
-                    const isFirst = idx === 0 && st.totalPoints > 0;
+                    const rInfo = pointsRankMap[st.userName] || { rank: idx + 1, isTied: false, displayRank: `${idx + 1}` };
+                    const isFirst = rInfo.rank === 1 && st.totalPoints > 0;
                     return (
                       <div
                         key={st.userName}
@@ -893,7 +1102,7 @@ export const CentralLeagueLeaderboard: React.FC<CentralLeagueLeaderboardProps> =
                                 : 'bg-[#ebd2a4] text-[#784610] border-[#c99a57]'
                             }`}
                           >
-                            {isFirst ? '🏆' : `${idx + 1}`}
+                            {isFirst ? '🏆' : rInfo.displayRank}
                           </div>
 
                           <div className="min-w-0">
@@ -904,6 +1113,11 @@ export const CentralLeagueLeaderboard: React.FC<CentralLeagueLeaderboardProps> =
                               {st.isYou && (
                                 <span className="font-pixel text-[8px] bg-[#38bdf8] text-[#082f49] px-1 py-0.2 rounded-2xs font-bold shrink-0">
                                   YOU
+                                </span>
+                              )}
+                              {rInfo.isTied && (
+                                <span className="font-pixel text-[7px] bg-[#facc15] text-[#713f12] px-1 py-0.2 rounded-2xs font-bold shrink-0">
+                                  TIED
                                 </span>
                               )}
                             </div>
