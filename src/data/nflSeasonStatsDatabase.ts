@@ -2832,12 +2832,12 @@ export const nflStatsDatabase = [
     "displayName": "Drake Maye",
     "teamCode": "NE",
     "position": "QB",
-    "pass_yds": 386,
-    "rush_yds": 64,
+    "pass_yds": 854,
+    "rush_yds": 136,
     "rec_yds": 0,
-    "tds": 1,
-    "last_game_recap": "vs PIT: 208 PASS • 17 RUSH • 9 PTS",
-    "last_game_pts": 9
+    "tds": 4,
+    "last_game_recap": "@ BUF: 269 PASS • 54 RUSH • 3 TD • 33 PTS",
+    "last_game_pts": 33
   },
   {
     "athleteId": "4240391",

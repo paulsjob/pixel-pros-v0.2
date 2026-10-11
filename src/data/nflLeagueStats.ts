@@ -19,7 +19,20 @@ export interface AthleteLeagueStat {
   last_game_pts?: number;
 }
 
-export const MANUAL_NFL_LEAGUE_STATS: AthleteLeagueStat[] = [];
+export const MANUAL_NFL_LEAGUE_STATS: AthleteLeagueStat[] = [
+  {
+    athleteId: '4431452',
+    displayName: 'Drake Maye',
+    teamCode: 'NE',
+    position: 'QB',
+    pass_yds: 854,
+    rush_yds: 136,
+    rec_yds: 0,
+    tds: 4,
+    last_game_recap: '@ BUF: 269 PASS • 54 RUSH • 3 TD • 33 PTS',
+    last_game_pts: 33,
+  },
+];
 
 const LEAGUE_STATS_BY_NAME = new Map<string, AthleteLeagueStat>();
 const LEAGUE_STATS_BY_ID = new Map<string, AthleteLeagueStat>();
@@ -31,6 +44,17 @@ function normalizeNameKey(name: string): string {
 // Populate from official ESPN synced database (378 verified athletes)
 const syncedList = (nflStatsDatabase || []) as AthleteLeagueStat[];
 for (const stat of syncedList) {
+  if (stat.athleteId) {
+    LEAGUE_STATS_BY_ID.set(stat.athleteId, stat);
+  }
+  if (stat.displayName) {
+    LEAGUE_STATS_BY_NAME.set(stat.displayName.trim().toLowerCase(), stat);
+    LEAGUE_STATS_BY_NAME.set(normalizeNameKey(stat.displayName), stat);
+  }
+}
+
+// Ensure manual verified updates take precedence
+for (const stat of MANUAL_NFL_LEAGUE_STATS) {
   if (stat.athleteId) {
     LEAGUE_STATS_BY_ID.set(stat.athleteId, stat);
   }

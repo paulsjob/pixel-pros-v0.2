@@ -478,7 +478,7 @@ export function validateTeamRoster(teamCodeOrRoster: string | any[], roster?: an
   return qbs >= 3 && rbs >= 3 && wrtes >= 6;
 }
 
-export const ROSTER_CACHE_VERSION = 'v2026_live_stats_v5';
+export const ROSTER_CACHE_VERSION = 'v2026_live_stats_v7';
 
 export const RETIRED_NFL_PLAYERS = new Set<string>([
   'russell wilson',
