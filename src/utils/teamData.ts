@@ -449,6 +449,7 @@ export function buildManifestCompetitors(): Competitor[] {
             tds: lStat?.tds || 0,
             touchdowns: lStat?.tds || 0,
             total_yards: totalYds,
+            games_played: lStat?.games_played || 0,
             primaryMetricLabel: ath.position === 'QB' ? 'Pass Yds' : ath.position === 'RB' ? 'Rush Yds' : 'Rec Yds',
             primaryMetricValue: primaryVal,
           };
@@ -465,18 +466,18 @@ export function buildManifestCompetitors(): Competitor[] {
             rec_yds: rcYards,
             tds: lStat?.tds || 0,
             total_yards: totalYds,
+            games_played: lStat?.games_played || 0,
           };
         })(),
         lastGameScore: (() => {
           const lStat = lookupNFLAthleteLeagueStats(ath.displayName, ath.athleteId);
-          if (!lStat) return 0;
-          return calculateNFLPlayerScore(lStat);
+          if (typeof lStat?.last_game_pts === 'number') return lStat.last_game_pts;
+          return 0;
         })(),
         lastGameStats: (() => {
           const lStat = lookupNFLAthleteLeagueStats(ath.displayName, ath.athleteId);
-          if (!lStat) return '0 TD · 0 YDS';
-          const tot = (lStat.pass_yds || 0) + (lStat.rush_yds || 0) + (lStat.rec_yds || 0);
-          return `${lStat.tds || 0} TD · ${tot} YDS`;
+          if (lStat?.last_game_recap) return lStat.last_game_recap;
+          return '0 TD · 0 YDS';
         })(),
         badges: ['gold_star'],
         avatar: {

@@ -90,30 +90,6 @@ export const CentralLeagueLeaderboard: React.FC<CentralLeagueLeaderboardProps> =
   const [expandedGames, setExpandedGames] = useState<Record<string, boolean>>({});
   const [expandedStandingsUser, setExpandedStandingsUser] = useState<string | null>(null);
 
-  const getUserStars = useCallback(
-    (uName: string) => {
-      const norm = (uName || '').trim().toUpperCase();
-      const superRoster = (roomRosters || []).find((r) => {
-        const p = parseLeagueIdentity(r.room_code || '');
-        return (
-          p.baseLeague === cleanRoom &&
-          (!p.isGameSlate || r.room_code === cleanRoom) &&
-          (r.user_name || '').trim().toUpperCase() === norm
-        );
-      });
-      if (!superRoster) return [];
-      const s1 = resolveCompetitorById(superRoster.star_1_id, competitors, null, sport);
-      const s2 = resolveCompetitorById(superRoster.star_2_id, competitors, null, sport);
-      const s3 = resolveCompetitorById(superRoster.star_3_id, competitors, null, sport);
-      return [
-        { slotLabel: 'QB', player: s1 },
-        { slotLabel: 'RB', player: s2 },
-        { slotLabel: 'WR/TE', player: s3 },
-      ].filter((x) => Boolean(x.player)) as Array<{ slotLabel: string; player: Competitor }>;
-    },
-    [roomRosters, cleanRoom, competitors, sport]
-  );
-
   const allSeasonMatches = useMemo(() => {
     const map = new Map<string, Match>();
     if (sport === 'nfl') {
@@ -148,6 +124,43 @@ export const CentralLeagueLeaderboard: React.FC<CentralLeagueLeaderboardProps> =
     const filtered = allSeasonMatches.filter((m) => m.week === selectedWeek);
     return sortMatchesByKickoffAndStatus(filtered.length > 0 ? filtered : matches);
   }, [allSeasonMatches, selectedWeek, matches]);
+
+  const getUserStars = useCallback(
+    (uName: string) => {
+      const norm = (uName || '').trim().toUpperCase();
+      // First check for specific week superstar roster
+      let superRoster = (roomRosters || []).find((r) => {
+        const p = parseLeagueIdentity(r.room_code || '');
+        return (
+          p.baseLeague === cleanRoom &&
+          !p.isGameSlate &&
+          p.weekNumber === selectedWeek &&
+          (r.user_name || '').trim().toUpperCase() === norm
+        );
+      });
+      // Fallback to room base roster without week suffix
+      if (!superRoster) {
+        superRoster = (roomRosters || []).find((r) => {
+          const p = parseLeagueIdentity(r.room_code || '');
+          return (
+            p.baseLeague === cleanRoom &&
+            (!p.isGameSlate || r.room_code === cleanRoom) &&
+            (r.user_name || '').trim().toUpperCase() === norm
+          );
+        });
+      }
+      if (!superRoster) return [];
+      const s1 = resolveCompetitorById(superRoster.star_1_id, competitors, null, sport);
+      const s2 = resolveCompetitorById(superRoster.star_2_id, competitors, null, sport);
+      const s3 = resolveCompetitorById(superRoster.star_3_id, competitors, null, sport);
+      return [
+        { slotLabel: 'QB', player: s1 },
+        { slotLabel: 'RB', player: s2 },
+        { slotLabel: 'WR/TE', player: s3 },
+      ].filter((x) => Boolean(x.player)) as Array<{ slotLabel: string; player: Competitor }>;
+    },
+    [roomRosters, cleanRoom, competitors, sport, selectedWeek]
+  );
 
   const toggleExpandGame = (slateKey: string) => {
     setExpandedGames((prev) => ({ ...prev, [slateKey]: !prev[slateKey] }));
@@ -400,6 +413,58 @@ export const CentralLeagueLeaderboard: React.FC<CentralLeagueLeaderboardProps> =
       });
     });
 
+    // Accumulate across Weekly Superstars Contest for selectedWeek
+    const superstarRosters = (roomRosters || []).filter((r) => {
+      const parsed = parseLeagueIdentity(r.room_code || '');
+      if (parsed.baseLeague !== cleanRoom) return false;
+      if (parsed.isGameSlate) return false;
+      if (parsed.weekNumber != null && parsed.weekNumber !== selectedWeek) return false;
+      return true;
+    });
+
+    const ssScoresList: Array<{ userName: string; score: number }> = [];
+
+    superstarRosters.forEach((r) => {
+      const u = (r.user_name || '').trim().toUpperCase();
+      if (!u || !statsMap[u]) return;
+      const s1 = resolveCompetitorById(r.star_1_id, competitors, null, sport);
+      const s2 = resolveCompetitorById(r.star_2_id, competitors, null, sport);
+      const s3 = resolveCompetitorById(r.star_3_id, competitors, null, sport);
+      const validStars = [s1, s2, s3].filter(Boolean) as Competitor[];
+      if (validStars.length > 0) {
+        const ssScore = validStars.reduce((sum, p) => sum + getPlayerLivePoints(p), 0);
+        statsMap[u].totalPoints += ssScore;
+        if (ssScore > 0) {
+          statsMap[u].gamesPlayed += 1;
+        }
+        if (ssScore > statsMap[u].highGameScore) {
+          statsMap[u].highGameScore = ssScore;
+          statsMap[u].highGameSlate = `WK ${selectedWeek} SUPERSTARS`;
+        }
+        ssScoresList.push({ userName: u, score: ssScore });
+      }
+    });
+
+    // Award Weekly Superstars contest win
+    if (ssScoresList.length > 0) {
+      ssScoresList.sort((a, b) => b.score - a.score);
+      const topSS = ssScoresList[0].score;
+      if (topSS > 0) {
+        const topWinners = ssScoresList.filter((s) => s.score === topSS);
+        if (topWinners.length === 1 && statsMap[topWinners[0].userName]) {
+          statsMap[topWinners[0].userName].totalWins += 1;
+          statsMap[topWinners[0].userName].outrightWins += 1;
+        } else if (topWinners.length > 1) {
+          topWinners.forEach((tw) => {
+            if (statsMap[tw.userName]) {
+              statsMap[tw.userName].totalWins += 1;
+              statsMap[tw.userName].tiedWins += 1;
+            }
+          });
+        }
+      }
+    }
+
     // Compute win rate & averages
     Object.values(statsMap).forEach((st) => {
       st.winRate = st.gamesPlayed > 0 ? Math.round((st.totalWins / st.gamesPlayed) * 100) : 0;
@@ -429,7 +494,7 @@ export const CentralLeagueLeaderboard: React.FC<CentralLeagueLeaderboardProps> =
     const championLeader = winsStandings[0] || null;
 
     return { winsStandings, pointsStandings, championLeader };
-  }, [cleanRoom, activeNormalizedName, roomRosters, competitors, sport, gamePodiums]);
+  }, [cleanRoom, activeNormalizedName, roomRosters, competitors, sport, gamePodiums, selectedWeek]);
 
   const filteredGames = useMemo(() => {
     if (filterMode === 'live_final') {

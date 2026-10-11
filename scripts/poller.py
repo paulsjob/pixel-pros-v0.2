@@ -75,21 +75,25 @@ def calculate_whole_number_points(
     touchdowns: int = 0,
     field_goals: int = 0,
     defensive_stops: int = 0,
-    total_yards: int = 0
+    total_yards: int = 0,
+    pass_yards: int = 0,
+    rush_yards: int = 0,
+    rec_yards: int = 0
 ) -> Dict[str, Any]:
+    # Updated rules: Touchdowns = 6, Pass Yards = 1 pt per 25 yds, Scrimmage Yards = 1 pt per 10 yds.
+    # NO field goals, NO defense stops!
     td_points = int(touchdowns) * 6
-    fg_points = int(field_goals) * 3
-    def_points = int(defensive_stops) * 2
-    yd_points = int(total_yards) // 50
-    total_points = td_points + fg_points + def_points + yd_points
+    p_pts = int(pass_yards) // 25 if pass_yards else 0
+    scrimmage_yds = (int(rush_yards) + int(rec_yards)) if (rush_yards or rec_yards) else total_yards
+    scrim_pts = int(scrimmage_yds) // 10
+    total_points = td_points + p_pts + scrim_pts
 
     return {
         "total_points": total_points,
         "breakdown": {
             "touchdowns": {"count": touchdowns, "points": td_points},
-            "field_goals": {"count": field_goals, "points": fg_points},
-            "defensive_stops": {"count": defensive_stops, "points": def_points},
-            "yards": {"count": total_yards, "points": yd_points}
+            "pass_yards": {"count": pass_yards, "points": p_pts},
+            "scrimmage_yards": {"count": scrimmage_yds, "points": scrim_pts}
         }
     }
 

@@ -860,33 +860,46 @@ export const PlayerPickerModal: React.FC<PlayerPickerModalProps> = ({
                           : 'bg-[#ebd2a4] border-[#c99a57]'
                       }`}>
                         {scoringInfo.gameState === 'pre' ? (
-                          <div className="flex items-center justify-center">
+                          <div className="flex flex-col items-center justify-center">
                             <span className="font-sans text-xs font-semibold text-[#5c3509] tracking-tight">
                               {getPlayerPrimaryYardage(player, sport).toLocaleString()} {getPlayerYardageLabel(player, sport)}
                             </span>
+                            {sport === 'nfl' && (() => {
+                              const lStat = lookupNFLAthleteLeagueStats(player.displayName, player.athleteId);
+                              const gp = lStat?.games_played || player.seasonStats?.games_played;
+                              return gp ? (
+                                <span className="font-sans text-[9px] text-[#784610]/80 leading-tight">
+                                  2026 Season · {gp} GP
+                                </span>
+                              ) : null;
+                            })()}
                           </div>
                         ) : scoringInfo.gameState === 'in' ? (
-                          <div className="flex items-center justify-center gap-1 flex-wrap">
-                            <span className="font-pixel text-xs sm:text-sm font-bold text-[#b91c1c] animate-pulse">
-                              {Math.round(scoringInfo.activeScore)} PTS
-                            </span>
-                            <span className="font-pixel text-[8px] text-white bg-[#b91c1c] px-1 py-0.5 rounded-2xs font-bold">
-                              LIVE
-                            </span>
-                            <span className="font-sans text-[11px] font-medium text-[#784610]">
-                              · {getPlayerPrimaryYardage(player, sport).toLocaleString()} {getPlayerYardageLabel(player, sport)}
+                          <div className="flex flex-col items-center justify-center gap-0.5">
+                            <div className="flex items-center justify-center gap-1">
+                              <span className="font-pixel text-xs sm:text-sm font-bold text-[#b91c1c] animate-pulse">
+                                {Math.round(scoringInfo.activeScore)} PTS
+                              </span>
+                              <span className="font-pixel text-[8px] text-white bg-[#b91c1c] px-1 py-0.5 rounded-2xs font-bold">
+                                LIVE
+                              </span>
+                            </div>
+                            <span className="font-sans text-[10px] font-medium text-[#784610] truncate max-w-full">
+                              Game: {scoringInfo.activeStatsLine}
                             </span>
                           </div>
                         ) : (
-                          <div className="flex items-center justify-center gap-1 flex-wrap">
-                            <span className="font-pixel text-xs sm:text-sm font-bold text-[#12579b]">
-                              {Math.round(scoringInfo.activeScore)} PTS
-                            </span>
-                            <span className="font-pixel text-[8px] text-[#93c5fd] bg-[#12579b] px-1 py-0.5 rounded-2xs font-bold">
-                              FINAL
-                            </span>
-                            <span className="font-sans text-[11px] font-medium text-[#784610]">
-                              · {getPlayerPrimaryYardage(player, sport).toLocaleString()} {getPlayerYardageLabel(player, sport)}
+                          <div className="flex flex-col items-center justify-center gap-0.5">
+                            <div className="flex items-center justify-center gap-1">
+                              <span className="font-pixel text-xs sm:text-sm font-bold text-[#12579b]">
+                                {Math.round(scoringInfo.activeScore)} PTS
+                              </span>
+                              <span className="font-pixel text-[8px] text-[#93c5fd] bg-[#12579b] px-1 py-0.5 rounded-2xs font-bold">
+                                FINAL
+                              </span>
+                            </div>
+                            <span className="font-sans text-[10px] font-medium text-[#784610] truncate max-w-full">
+                              Game: {scoringInfo.activeStatsLine}
                             </span>
                           </div>
                         )}

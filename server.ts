@@ -1201,6 +1201,38 @@ app.get('/api/espn/athlete-overview', async (req: Request, res: Response) => {
   }
 });
 
+// ESPN Official Regular Season Statistics Proxy (passing, rushing, receiving, gamesPlayed)
+const athleteSeasonStatsCache = new Map<string, { timestamp: number; data: any }>();
+app.get('/api/espn/athlete-season-stats', async (req: Request, res: Response) => {
+  try {
+    const athleteId = String(req.query.athleteId || req.query.id || '');
+    const season = String(req.query.season || '2026');
+    if (!athleteId) {
+      res.status(400).json({ error: 'athleteId is required' });
+      return;
+    }
+
+    const cacheKey = `${athleteId}_${season}`;
+    const cached = athleteSeasonStatsCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < ATHLETE_CACHE_TTL_MS) {
+      res.json(cached.data);
+      return;
+    }
+
+    const url = `https://sports.core.api.espn.com/v2/sports/football/leagues/nfl/seasons/${season}/types/2/athletes/${athleteId}/statistics`;
+    const resp = await fetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(4000) });
+    if (!resp.ok) {
+      res.status(resp.status).json({ error: `ESPN returned ${resp.status}` });
+      return;
+    }
+    const data = await resp.json();
+    athleteSeasonStatsCache.set(cacheKey, { timestamp: Date.now(), data });
+    res.json(data);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to proxy ESPN season statistics' });
+  }
+});
+
 app.get('/api/espn/depthchart', async (req: Request, res: Response) => {
   try {
     const teamId = String(req.query.teamId || req.query.team || '');

@@ -674,6 +674,7 @@ export async function syncESPNData(sport: SportId = 'nfl'): Promise<ESPNSyncResu
           tds: seasonTds,
           touchdowns: seasonTds,
           total_yards: seasonTotalYds,
+          games_played: leagueStat?.games_played || base.seasonStats?.games_played || 0,
           primaryMetricLabel: primaryLabel,
           primaryMetricValue: seasonPrimaryVal,
         },
@@ -683,9 +684,10 @@ export async function syncESPNData(sport: SportId = 'nfl'): Promise<ESPNSyncResu
           rec_yds: seasonRec,
           tds: seasonTds,
           total_yards: seasonTotalYds,
+          games_played: leagueStat?.games_played || base.seasonStats?.games_played || 0,
         },
-        lastGameScore: base.lastGameScore ?? (leagueStat ? calculateNFLPoints(leagueStat.tds || 0, 0, 0, leagueStat.pass_yds || 0, leagueStat.rush_yds || 0, leagueStat.rec_yds || 0) : 0),
-        lastGameStats: base.lastGameStats ?? (leagueStat ? `${leagueStat.tds || 0} TD · ${seasonTotalYds} YDS` : '0 TD · 0 YDS'),
+        lastGameScore: typeof leagueStat?.last_game_pts === 'number' ? leagueStat.last_game_pts : (base.lastGameScore ?? 0),
+        lastGameStats: leagueStat?.last_game_recap || base.lastGameStats || '0 TD · 0 YDS',
       });
     }
 

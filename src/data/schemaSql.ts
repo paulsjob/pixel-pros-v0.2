@@ -189,12 +189,11 @@ INSERT INTO public.sports (id, name, icon_name, season_label) VALUES
 ('soccer', 'Soccer', 'soccer', 'Matchday 5')
 ON CONFLICT (id) DO NOTHING;
 
--- Seed Simple Whole-Number Scoring Rules
+-- Seed Simple Whole-Number Scoring Rules (NO field goals, NO defense stops)
 INSERT INTO public.scoring_rules (sport_id, event_type, display_name, points_value, description) VALUES
 ('nfl', 'touchdown', 'Touchdown', 6, 'Six whole points for every touchdown!'),
-('nfl', 'field_goal', 'Field Goal', 3, 'Three points for field goals'),
-('nfl', 'safety', 'Safety / Defense', 2, 'Two points for defensive stops'),
-('nfl', 'pass_50yds', 'Pass 50 Yards', 1, 'One whole point per 50 passing yards'),
+('nfl', 'scrimmage_10yds', '10 Scrimmage Yards', 1, 'One whole point per 10 scrimmage yards'),
+('nfl', 'pass_25yds', '25 Passing Yards', 1, 'One whole point per 25 passing yards'),
 ('nba', 'basket_3pt', '3-Pointer', 3, 'Three whole points for a long-distance basket'),
 ('nba', 'dunk', 'Slam Dunk', 2, 'Two whole points for inside baskets'),
 ('soccer', 'goal', 'Goal Scored', 1, 'One point per goal - simple and clean')
@@ -279,9 +278,9 @@ A lightweight, self-contained background daemon that:
 1. Polls live games and box score stats every 30 to 60 seconds.
 2. Calculates dead-simple, whole-number points:
    - Touchdown:        +6 PTS
-   - Field Goal:       +3 PTS
-   - Big Defense Stop: +2 PTS (Sack, Interception, Fumble Recovery)
-   - Every 50 Yds:     +1 PT  (Total Yards // 50)
+   - Every 10 Scrimmage Yds: +1 PT (Rush + Rec Yards // 10)
+   - Every 25 Pass Yds:      +1 PT (Pass Yards // 25)
+   (NO field goals, NO defensive stops)
 3. Pushes updated totals directly into your Supabase competitors/players table.
    Supabase Realtime immediately broadcasts the update to all connected
    phones and tablets with zero page reloads!

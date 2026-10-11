@@ -15,6 +15,7 @@ export interface AthleteLeagueStat {
   rush_yds: number;
   rec_yds: number;
   tds?: number;
+  games_played?: number;
   last_game_recap?: string;
   last_game_pts?: number;
 }
@@ -29,7 +30,8 @@ export const MANUAL_NFL_LEAGUE_STATS: AthleteLeagueStat[] = [
     rush_yds: 136,
     rec_yds: 0,
     tds: 4,
-    last_game_recap: '@ BUF: 269 PASS • 54 RUSH • 3 TD • 33 PTS',
+    games_played: 4,
+    last_game_recap: 'WK 4 @ BUF: 269 PASS • 54 RUSH • 3 TD • 33 PTS',
     last_game_pts: 33,
   },
 ];

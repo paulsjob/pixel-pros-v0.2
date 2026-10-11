@@ -49,8 +49,6 @@ export const PlayerCardModal: React.FC<PlayerCardModalProps> = ({
   const passPoints = Math.floor(passYds / 25);
   const rushPoints = Math.floor(rushYds / 10);
   const recPoints = Math.floor(recYds / 10);
-  const fgPoints = fgs * 3;
-  const stopPoints = stops * 2;
 
   // NBA Live Stats
   const threePm = isPreGame ? 0 : Number(liveStatsObj.three_pm ?? liveStatsObj.threes ?? 0);
@@ -67,37 +65,73 @@ export const PlayerCardModal: React.FC<PlayerCardModalProps> = ({
   // Live score: 0 if pre-game; actual live score if in-progress or final
   const heroScore = isPreGame ? 0 : scoringInfo.activeScore;
   const breakdownTargetScore = heroScore;
-  const nflRawSum = tdPoints + passPoints + rushPoints + recPoints + fgPoints + stopPoints;
+  const nflRawSum = tdPoints + passPoints + rushPoints + recPoints;
   const nflAdjustment = breakdownTargetScore - nflRawSum;
 
   const isOnFire = sport === 'nba' && heroScore >= 40;
 
-  // 2. 2026 SEASON TOTAL STATS (from Verified ESPN Season Database)
+  // 2. 2026 SEASON TOTAL STATS (Direct from Official ESPN Season Statistics)
   const leagueStat = sport === 'nfl' ? lookupNFLAthleteLeagueStats(selectedPlayer.displayName, selectedPlayer.athleteId) : undefined;
   const seasonStats = selectedPlayer.seasonStats || selectedPlayer.season_stats;
 
-  const basePass = Number(leagueStat?.pass_yds ?? seasonStats?.pass_yds ?? 0);
-  const baseRush = Number(leagueStat?.rush_yds ?? seasonStats?.rush_yds ?? 0);
-  const baseRec = Number(leagueStat?.rec_yds ?? seasonStats?.rec_yds ?? 0);
-  const baseTds = Number(leagueStat?.tds ?? seasonStats?.tds ?? seasonStats?.touchdowns ?? 0);
+  // Background refresh from official ESPN athlete overview API
+  useEffect(() => {
+    if (!selectedPlayer?.athleteId || sport !== 'nfl') return;
+    let isMounted = true;
+    fetch(`/api/espn/athlete-overview?athleteId=${selectedPlayer.athleteId}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!isMounted || !data) return;
+        const regSplit = data.statistics?.splits?.find((s: any) => s.displayName === 'Regular Season');
+        if (regSplit && Array.isArray(regSplit.stats) && Array.isArray(data.statistics?.names)) {
+          const names = data.statistics.names as string[];
+          const stats = regSplit.stats as string[];
+          const getVal = (name: string) => {
+            const idx = names.indexOf(name);
+            if (idx === -1) return 0;
+            return parseFloat((stats[idx] || '0').replace(/,/g, '')) || 0;
+          };
+          const passYds = getVal('passingYards');
+          const rushYds = getVal('rushingYards');
+          const recYds = getVal('receivingYards');
+          const passTds = getVal('passingTouchdowns');
+          const rushTds = getVal('rushingTouchdowns');
+          const recTds = getVal('receivingTouchdowns');
+          const tds = passTds + rushTds + recTds;
+          const games = getVal('gamesPlayed');
+          registerAthleteLeagueStat({
+            athleteId: selectedPlayer.athleteId,
+            displayName: selectedPlayer.displayName,
+            teamCode: selectedPlayer.teamCode || '',
+            position: selectedPlayer.position || 'QB',
+            pass_yds: passYds,
+            rush_yds: rushYds,
+            rec_yds: recYds,
+            tds,
+            games_played: games > 0 ? games : undefined,
+          });
+        }
+      })
+      .catch(() => {});
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedPlayer?.athleteId, selectedPlayer?.displayName, selectedPlayer?.teamCode, selectedPlayer?.position, sport]);
 
-  // Cumulative totals must always encompass any completed or live performance
-  const seasonPass = Math.max(basePass, passYds > 0 && basePass < passYds ? basePass + passYds : basePass);
-  const seasonRush = Math.max(baseRush, rushYds > 0 && baseRush < rushYds ? baseRush + rushYds : baseRush);
-  const seasonRec = Math.max(baseRec, recYds > 0 && baseRec < recYds ? baseRec + recYds : baseRec);
-  const seasonTds = Math.max(baseTds, tds > 0 && baseTds < tds ? baseTds + tds : baseTds);
-  const seasonTotalYds = Number(seasonStats?.total_yards && seasonStats.total_yards > (seasonPass + seasonRush + seasonRec) ? seasonStats.total_yards : (seasonPass + seasonRush + seasonRec));
+  const seasonPass = Number(leagueStat?.pass_yds ?? seasonStats?.pass_yds ?? 0);
+  const seasonRush = Number(leagueStat?.rush_yds ?? seasonStats?.rush_yds ?? 0);
+  const seasonRec = Number(leagueStat?.rec_yds ?? seasonStats?.rec_yds ?? 0);
+  const seasonTds = Number(leagueStat?.tds ?? seasonStats?.tds ?? seasonStats?.touchdowns ?? 0);
+  const gamesPlayed = Number(leagueStat?.games_played ?? seasonStats?.games_played ?? (seasonPass + seasonRush + seasonRec > 0 ? 4 : 0));
+  const seasonTotalYds = Number(seasonStats?.total_yards ?? (seasonPass + seasonRush + seasonRec));
 
-  // 3. LAST GAME PERFORMANCE (Prior Week Recap for State 2)
+  // 3. PRIOR GAME RECAP (Most recent completed game performance)
   const lastGameRecapData = useMemo(() => {
     if (leagueStat?.last_game_recap) {
       return {
         recap: leagueStat.last_game_recap,
         score: leagueStat.last_game_pts ?? selectedPlayer.lastGameScore ?? null,
       };
-    }
-    if (selectedPlayer.displayName === 'Jordan Love' || selectedPlayer.athleteId === '4036378') {
-      return { recap: 'WEEK 3 vs ATL: 312 YDS • 2 TD • 24 PTS', score: 24 };
     }
     const rawLastStats = selectedPlayer.lastGameStats ?? selectedPlayer.last_game_stats;
     const rawLastScore = selectedPlayer.lastGameScore ?? selectedPlayer.last_game_score;
@@ -117,7 +151,7 @@ export const PlayerCardModal: React.FC<PlayerCardModalProps> = ({
       };
     }
     return { recap: selectedPlayer.lastGameStats || 'ACTIVE ON ROSTER', score: selectedPlayer.lastGameScore || null };
-  }, [leagueStat, selectedPlayer, seasonPass, seasonRush, seasonRec, seasonTotalYds, sport]);
+  }, [leagueStat, selectedPlayer, seasonTotalYds, seasonTds, sport]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/80 backdrop-blur-xs animate-in fade-in duration-150 overflow-y-auto">
@@ -276,64 +310,61 @@ export const PlayerCardModal: React.FC<PlayerCardModalProps> = ({
           )}
         </div>
 
-        {/* STATE 1: ACTIVE GAME WEEK (Game is 'in' or 'post') -> SHOW ONLY THIS WEEK'S GAME */}
-        {!isPreGame ? (
-          <>
-            {/* Live / Final Game Stats Grid */}
-            <div className="mt-2 w-full box-border">
-              <div className="mb-1 flex items-center justify-between">
-                <span className="font-pixel text-[9px] sm:text-[10px] text-[#784610] uppercase font-bold">
-                  {scoringInfo.gameState === 'post' ? 'FINAL GAME STATS' : 'LIVE IN-GAME STATS'}
-                </span>
-                <span className="font-retro text-[10px] text-[#784610]/80">
-                  OFFICIAL BOXSCORE
-                </span>
-              </div>
-              {sport === 'nba' ? (
-                <div className="grid grid-cols-4 gap-1 w-full box-border text-center">
-                  <div className="min-w-0 p-1 bg-[#fae9c8] border border-[#d4a86a] rounded-xs flex flex-col justify-center items-center shadow-2xs text-center">
-                    <span className="block font-retro text-[8px] text-[#784610] uppercase tracking-wider font-bold whitespace-nowrap">3PM</span>
-                    <span className="font-pixel text-xs sm:text-sm text-[#b45309] font-bold truncate">{threePm}</span>
-                  </div>
-                  <div className="min-w-0 p-1 bg-[#fae9c8] border border-[#d4a86a] rounded-xs flex flex-col justify-center items-center shadow-2xs text-center">
-                    <span className="block font-retro text-[8px] text-[#784610] uppercase tracking-wider font-bold whitespace-nowrap">REB</span>
-                    <span className="font-pixel text-xs sm:text-sm text-[#5c3509] truncate">{reb}</span>
-                  </div>
-                  <div className="min-w-0 p-1 bg-[#fae9c8] border border-[#d4a86a] rounded-xs flex flex-col justify-center items-center shadow-2xs text-center">
-                    <span className="block font-retro text-[8px] text-[#784610] uppercase tracking-wider font-bold whitespace-nowrap">AST</span>
-                    <span className="font-pixel text-xs sm:text-sm text-[#5c3509] truncate">{ast}</span>
-                  </div>
-                  <div className="min-w-0 p-1 bg-[#fae9c8] border border-[#d4a86a] rounded-xs flex flex-col justify-center items-center shadow-2xs text-center">
-                    <span className="block font-retro text-[8px] text-[#784610] uppercase tracking-wider font-bold whitespace-nowrap">PTS</span>
-                    <span className="font-pixel text-xs sm:text-sm text-[#12579b] font-bold truncate">{pts}</span>
-                  </div>
-                </div>
-              ) : (
-                <div className="grid grid-cols-4 gap-1 w-full box-border text-center">
-                  <div className="min-w-0 p-1 bg-[#fae9c8] border border-[#d4a86a] rounded-xs flex flex-col justify-center items-center shadow-2xs text-center">
-                    <span className="block font-retro text-[8px] text-[#784610] uppercase tracking-wider font-bold whitespace-nowrap">PASS YDS</span>
-                    <span className="font-pixel text-xs sm:text-sm text-[#5c3509] font-bold truncate">{passYds}</span>
-                  </div>
-                  <div className="min-w-0 p-1 bg-[#fae9c8] border border-[#d4a86a] rounded-xs flex flex-col justify-center items-center shadow-2xs text-center">
-                    <span className="block font-retro text-[8px] text-[#784610] uppercase tracking-wider font-bold whitespace-nowrap">RUSH YDS</span>
-                    <span className="font-pixel text-xs sm:text-sm text-[#5c3509] font-bold truncate">{rushYds}</span>
-                  </div>
-                  <div className="min-w-0 p-1 bg-[#fae9c8] border border-[#d4a86a] rounded-xs flex flex-col justify-center items-center shadow-2xs text-center">
-                    <span className="block font-retro text-[8px] text-[#784610] uppercase tracking-wider font-bold whitespace-nowrap">REC YDS</span>
-                    <span className="font-pixel text-xs sm:text-sm text-[#5c3509] font-bold truncate">{recYds}</span>
-                  </div>
-                  <div className="min-w-0 p-1 bg-[#fae9c8] border border-[#d4a86a] rounded-xs flex flex-col justify-center items-center shadow-2xs text-center">
-                    <span className="block font-retro text-[8px] text-[#784610] uppercase tracking-wider font-bold whitespace-nowrap">TD</span>
-                    <span className="font-pixel text-xs sm:text-sm text-[#b45309] font-bold truncate">{tds}</span>
-                  </div>
-                </div>
-              )}
+        {/* SECTION 1: THIS GAME STATS & POINTS BREAKDOWN (If game is in-progress or final) */}
+        {!isPreGame && (
+          <div className="mt-2 w-full box-border">
+            <div className="mb-1 flex items-center justify-between">
+              <span className="font-pixel text-[9px] sm:text-[10px] text-[#784610] uppercase font-bold">
+                {scoringInfo.gameState === 'post' ? 'FINAL GAME STATS' : 'LIVE IN-GAME STATS'}
+              </span>
+              <span className="font-retro text-[10px] text-[#784610]/80">
+                OFFICIAL BOXSCORE
+              </span>
             </div>
+            {sport === 'nba' ? (
+              <div className="grid grid-cols-4 gap-1 w-full box-border text-center">
+                <div className="min-w-0 p-1 bg-[#fae9c8] border border-[#d4a86a] rounded-xs flex flex-col justify-center items-center shadow-2xs text-center">
+                  <span className="block font-retro text-[8px] text-[#784610] uppercase tracking-wider font-bold whitespace-nowrap">3PM</span>
+                  <span className="font-pixel text-xs sm:text-sm text-[#b45309] font-bold truncate">{threePm}</span>
+                </div>
+                <div className="min-w-0 p-1 bg-[#fae9c8] border border-[#d4a86a] rounded-xs flex flex-col justify-center items-center shadow-2xs text-center">
+                  <span className="block font-retro text-[8px] text-[#784610] uppercase tracking-wider font-bold whitespace-nowrap">REB</span>
+                  <span className="font-pixel text-xs sm:text-sm text-[#5c3509] truncate">{reb}</span>
+                </div>
+                <div className="min-w-0 p-1 bg-[#fae9c8] border border-[#d4a86a] rounded-xs flex flex-col justify-center items-center shadow-2xs text-center">
+                  <span className="block font-retro text-[8px] text-[#784610] uppercase tracking-wider font-bold whitespace-nowrap">AST</span>
+                  <span className="font-pixel text-xs sm:text-sm text-[#5c3509] truncate">{ast}</span>
+                </div>
+                <div className="min-w-0 p-1 bg-[#fae9c8] border border-[#d4a86a] rounded-xs flex flex-col justify-center items-center shadow-2xs text-center">
+                  <span className="block font-retro text-[8px] text-[#784610] uppercase tracking-wider font-bold whitespace-nowrap">PTS</span>
+                  <span className="font-pixel text-xs sm:text-sm text-[#12579b] font-bold truncate">{pts}</span>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-4 gap-1 w-full box-border text-center">
+                <div className="min-w-0 p-1 bg-[#fae9c8] border border-[#d4a86a] rounded-xs flex flex-col justify-center items-center shadow-2xs text-center">
+                  <span className="block font-retro text-[8px] text-[#784610] uppercase tracking-wider font-bold whitespace-nowrap">PASS YDS</span>
+                  <span className="font-pixel text-xs sm:text-sm text-[#5c3509] font-bold truncate">{passYds}</span>
+                </div>
+                <div className="min-w-0 p-1 bg-[#fae9c8] border border-[#d4a86a] rounded-xs flex flex-col justify-center items-center shadow-2xs text-center">
+                  <span className="block font-retro text-[8px] text-[#784610] uppercase tracking-wider font-bold whitespace-nowrap">RUSH YDS</span>
+                  <span className="font-pixel text-xs sm:text-sm text-[#5c3509] font-bold truncate">{rushYds}</span>
+                </div>
+                <div className="min-w-0 p-1 bg-[#fae9c8] border border-[#d4a86a] rounded-xs flex flex-col justify-center items-center shadow-2xs text-center">
+                  <span className="block font-retro text-[8px] text-[#784610] uppercase tracking-wider font-bold whitespace-nowrap">REC YDS</span>
+                  <span className="font-pixel text-xs sm:text-sm text-[#5c3509] font-bold truncate">{recYds}</span>
+                </div>
+                <div className="min-w-0 p-1 bg-[#fae9c8] border border-[#d4a86a] rounded-xs flex flex-col justify-center items-center shadow-2xs text-center">
+                  <span className="block font-retro text-[8px] text-[#784610] uppercase tracking-wider font-bold whitespace-nowrap">TD</span>
+                  <span className="font-pixel text-xs sm:text-sm text-[#b45309] font-bold truncate">{tds}</span>
+                </div>
+              </div>
+            )}
 
-            {/* Points Breakdown: How this week's points were earned */}
-            <div className="mt-2 p-2 bg-[#ebd2a4] border-2 border-[#c99a57] rounded-xs shadow-[inset_0_2px_4px_rgba(0,0,0,0.06)]">
+            {/* Points Breakdown */}
+            <div className="mt-1.5 p-1.5 bg-[#ebd2a4] border-2 border-[#c99a57] rounded-xs shadow-[inset_0_2px_4px_rgba(0,0,0,0.06)]">
               <div className="pb-1 mb-1 border-b border-[#c99a57] flex items-center justify-between">
-                <span className="font-pixel text-[9px] sm:text-[10px] text-[#5c3509] tracking-wider uppercase flex items-center gap-1 font-bold">
+                <span className="font-pixel text-[9px] text-[#5c3509] tracking-wider uppercase flex items-center gap-1 font-bold">
                   <span>🧮</span>
                   <span>POINTS BREAKDOWN</span>
                 </span>
@@ -349,17 +380,14 @@ export const PlayerCardModal: React.FC<PlayerCardModalProps> = ({
                       <span className="font-bold text-[#5c3509]">🎯 {threePm} 3-POINTERS</span>
                       <span className="text-[#b45309] font-bold">+{nbaThreePts} PTS</span>
                     </div>
-
                     <div className="flex items-center justify-between py-0.5 px-1.5 bg-[#fae5b8] border border-[#d4a86a] rounded-xs font-pixel text-[10px]">
                       <span className="font-bold text-[#5c3509]">🤝 {ast} ASSISTS</span>
                       <span className="text-[#12579b] font-bold">+{nbaAstPts} PTS</span>
                     </div>
-
                     <div className="flex items-center justify-between py-0.5 px-1.5 bg-[#fae5b8] border border-[#d4a86a] rounded-xs font-pixel text-[10px]">
                       <span className="font-bold text-[#5c3509]">🏀 {reb} REBOUNDS</span>
                       <span className="text-[#12579b] font-bold">+{nbaRebPts} PTS</span>
                     </div>
-
                     <div className="flex items-center justify-between py-1 px-2 bg-[#fae5b8] border border-[#d4a86a] rounded-xs font-sans text-xs">
                       <span className="font-bold text-[#5c3509]">🏀 {pts} PTS (1/3)</span>
                       <span className="text-[#12579b] font-bold">+{nbaGamePts} PTS</span>
@@ -368,35 +396,31 @@ export const PlayerCardModal: React.FC<PlayerCardModalProps> = ({
                 ) : (
                   <>
                     {tds > 0 && (
-                      <div className="flex items-center justify-between py-1 px-2 bg-[#fae5b8] border border-[#d4a86a] rounded-xs font-sans text-xs">
+                      <div className="flex items-center justify-between py-0.5 px-1.5 bg-[#fae5b8] border border-[#d4a86a] rounded-xs font-sans text-[11px]">
                         <span className="font-bold text-[#5c3509]">🏈 {tds} TOUCHDOWN{tds > 1 ? 'S' : ''}</span>
                         <span className="text-[#b45309] font-bold">+{tdPoints} PTS</span>
                       </div>
                     )}
-
                     {passYds > 0 && (
-                      <div className="flex items-center justify-between py-1 px-2 bg-[#fae5b8] border border-[#d4a86a] rounded-xs font-sans text-xs">
+                      <div className="flex items-center justify-between py-0.5 px-1.5 bg-[#fae5b8] border border-[#d4a86a] rounded-xs font-sans text-[11px]">
                         <span className="font-bold text-[#5c3509]">⚡ {passYds} PASS YDS</span>
                         <span className="text-[#12579b] font-bold">+{passPoints} PTS</span>
                       </div>
                     )}
-
                     {rushYds > 0 && (
-                      <div className="flex items-center justify-between py-1 px-2 bg-[#fae5b8] border border-[#d4a86a] rounded-xs font-sans text-xs">
+                      <div className="flex items-center justify-between py-0.5 px-1.5 bg-[#fae5b8] border border-[#d4a86a] rounded-xs font-sans text-[11px]">
                         <span className="font-bold text-[#5c3509]">🏃 {rushYds} RUSH YDS</span>
                         <span className="text-[#12579b] font-bold">+{rushPoints} PTS</span>
                       </div>
                     )}
-
                     {recYds > 0 && (
-                      <div className="flex items-center justify-between py-1 px-2 bg-[#fae5b8] border border-[#d4a86a] rounded-xs font-sans text-xs">
+                      <div className="flex items-center justify-between py-0.5 px-1.5 bg-[#fae5b8] border border-[#d4a86a] rounded-xs font-sans text-[11px]">
                         <span className="font-bold text-[#5c3509]">🙌 {recYds} REC YDS</span>
                         <span className="text-[#12579b] font-bold">+{recPoints} PTS</span>
                       </div>
                     )}
-
                     {nflAdjustment !== 0 && (
-                      <div className="flex items-center justify-between py-1 px-2 bg-[#fae5b8] border border-[#d4a86a] rounded-xs font-sans text-xs">
+                      <div className="flex items-center justify-between py-0.5 px-1.5 bg-[#fae5b8] border border-[#d4a86a] rounded-xs font-sans text-[11px]">
                         <span className="font-bold text-[#5c3509]">{nflAdjustment > 0 ? '🌟 BONUS' : '⚠️ ADJUSTMENT'}</span>
                         <span className={`font-bold ${nflAdjustment > 0 ? 'text-[#15803d]' : 'text-[#b91c1c]'}`}>
                           {nflAdjustment > 0 ? `+${nflAdjustment}` : `${nflAdjustment}`} PTS
@@ -414,63 +438,71 @@ export const PlayerCardModal: React.FC<PlayerCardModalProps> = ({
                 </div>
               </div>
             </div>
-            {/* NOTE: 2026 SEASON TOTALS & LAST GAME PERFORMANCE ARE STRICTLY HIDDEN IN STATE 1 TO PREVENT CLUTTER & CONTRADICTIONS */}
-          </>
-        ) : (
-          /* STATE 2: NEW WEEK ROLLOVER / PRE-GAME (0 PTS) -> SHOW SCOUTING DATA TO HELP THEM PICK */
-          <>
-            {/* 1. LAST GAME PERFORMANCE (Most recent game recap) */}
-            <div className="mt-2 p-2 bg-[#f1f5f9] border-2 border-[#94a3b8] rounded-xs shadow-2xs">
-              <div className="flex items-center justify-between pb-1 mb-1 border-b border-[#cbd5e1]">
-                <span className="font-pixel text-[9px] sm:text-[10px] text-[#475569] tracking-wider uppercase flex items-center gap-1 font-bold">
-                  <Calendar size={11} className="text-[#64748b]" />
-                  <span>LAST GAME PERFORMANCE</span>
-                </span>
-                {typeof lastGameRecapData.score === 'number' && lastGameRecapData.score > 0 && (
-                  <span className="font-sans text-xs text-[#0f172a] bg-[#e2e8f0] px-2 py-0.5 rounded-2xs border border-[#cbd5e1] font-bold">
-                    {lastGameRecapData.score} PTS
-                  </span>
+          </div>
+        )}
+
+        {/* SECTION 2: PRIOR GAME RECAP (Most recent completed game) */}
+        <div className="mt-2 p-2 bg-[#f1f5f9] border-2 border-[#94a3b8] rounded-xs shadow-2xs">
+          <div className="flex items-center justify-between pb-1 mb-1 border-b border-[#cbd5e1]">
+            <span className="font-pixel text-[9px] sm:text-[10px] text-[#475569] tracking-wider uppercase flex items-center gap-1 font-bold">
+              <Calendar size={11} className="text-[#64748b]" />
+              <span>PRIOR GAME RECAP</span>
+            </span>
+            {typeof lastGameRecapData.score === 'number' && lastGameRecapData.score > 0 && (
+              <span className="font-sans text-xs text-[#0f172a] bg-[#e2e8f0] px-2 py-0.5 rounded-2xs border border-[#cbd5e1] font-bold">
+                {lastGameRecapData.score} PTS
+              </span>
+            )}
+          </div>
+          <div className="font-sans text-xs text-[#334155] flex items-center justify-between px-1">
+            <span>Recent Performance:</span>
+            <span className="font-sans text-xs text-[#0f172a] font-bold">{lastGameRecapData.recap}</span>
+          </div>
+        </div>
+
+        {/* SECTION 3: 2026 REGULAR SEASON TOTALS (Official ESPN Baseline - Always Visible) */}
+        {sport === 'nfl' && (
+          <div className="mt-2 p-2 bg-[#faebd7] border-2 border-[#b45309] rounded-xs shadow-2xs">
+            <div className="flex items-center justify-between pb-1 mb-1.5 border-b border-[#e2ba7d]">
+              <span className="font-pixel text-[9px] sm:text-[10px] text-[#b45309] tracking-wider uppercase flex items-center gap-1 font-bold">
+                <Trophy size={11} className="text-[#b45309]" />
+                <span>2026 SEASON TOTALS {gamesPlayed > 0 ? `(${gamesPlayed} GP)` : ''}</span>
+              </span>
+              <span className="font-sans text-[10px] text-[#784610] bg-[#fae5b8] px-1.5 py-0.5 rounded-2xs border border-[#d4a86a] font-bold">
+                OFFICIAL ESPN REGULAR SEASON
+              </span>
+            </div>
+            <div className="grid grid-cols-4 gap-1 text-center">
+              <div className="p-1 bg-[#fff8eb] border border-[#e2ba7d] rounded-xs">
+                <span className="block font-sans text-[10px] text-[#784610] font-bold">PASS YDS</span>
+                <span className="font-sans text-xs sm:text-sm text-[#5c3509] font-bold">{seasonPass.toLocaleString()}</span>
+                {gamesPlayed > 0 && seasonPass > 0 && (
+                  <span className="block font-sans text-[9px] text-[#784610]">{(seasonPass / gamesPlayed).toFixed(0)}/gm</span>
                 )}
               </div>
-              <div className="font-sans text-xs text-[#334155] flex items-center justify-between px-1">
-                <span>Recent Recap:</span>
-                <span className="font-sans text-xs text-[#0f172a] font-bold">{lastGameRecapData.recap}</span>
+              <div className="p-1 bg-[#fff8eb] border border-[#e2ba7d] rounded-xs">
+                <span className="block font-sans text-[10px] text-[#784610] font-bold">RUSH YDS</span>
+                <span className="font-sans text-xs sm:text-sm text-[#5c3509] font-bold">{seasonRush.toLocaleString()}</span>
+                {gamesPlayed > 0 && seasonRush > 0 && (
+                  <span className="block font-sans text-[9px] text-[#784610]">{(seasonRush / gamesPlayed).toFixed(0)}/gm</span>
+                )}
+              </div>
+              <div className="p-1 bg-[#fff8eb] border border-[#e2ba7d] rounded-xs">
+                <span className="block font-sans text-[10px] text-[#784610] font-bold">REC YDS</span>
+                <span className="font-sans text-xs sm:text-sm text-[#5c3509] font-bold">{seasonRec.toLocaleString()}</span>
+                {gamesPlayed > 0 && seasonRec > 0 && (
+                  <span className="block font-sans text-[9px] text-[#784610]">{(seasonRec / gamesPlayed).toFixed(0)}/gm</span>
+                )}
+              </div>
+              <div className="p-1 bg-[#fff8eb] border border-[#e2ba7d] rounded-xs">
+                <span className="block font-sans text-[10px] text-[#784610] font-bold">TDS</span>
+                <span className="font-sans text-xs sm:text-sm text-[#b45309] font-bold">{seasonTds}</span>
+                {gamesPlayed > 0 && seasonTds > 0 && (
+                  <span className="block font-sans text-[9px] text-[#784610]">{(seasonTds / gamesPlayed).toFixed(1)}/gm</span>
+                )}
               </div>
             </div>
-
-            {/* 2. 2026 SEASON TOTALS (Accurate cumulative season totals from ESPN) */}
-            {sport === 'nfl' && (
-              <div className="mt-2 p-2 bg-[#faebd7] border-2 border-[#b45309] rounded-xs shadow-2xs">
-                <div className="flex items-center justify-between pb-1 mb-1.5 border-b border-[#e2ba7d]">
-                  <span className="font-pixel text-[9px] sm:text-[10px] text-[#b45309] tracking-wider uppercase flex items-center gap-1 font-bold">
-                    <Trophy size={11} className="text-[#b45309]" />
-                    <span>2026 SEASON TOTALS</span>
-                  </span>
-                  <span className="font-sans text-[10px] text-[#784610] bg-[#fae5b8] px-1.5 py-0.5 rounded-2xs border border-[#d4a86a] font-bold">
-                    OFFICIAL ESPN
-                  </span>
-                </div>
-                <div className="grid grid-cols-4 gap-1 text-center">
-                  <div className="p-1 bg-[#fff8eb] border border-[#e2ba7d] rounded-xs">
-                    <span className="block font-sans text-[10px] text-[#784610] font-bold">PASS YDS</span>
-                    <span className="font-sans text-xs sm:text-sm text-[#5c3509] font-bold">{seasonPass.toLocaleString()}</span>
-                  </div>
-                  <div className="p-1 bg-[#fff8eb] border border-[#e2ba7d] rounded-xs">
-                    <span className="block font-sans text-[10px] text-[#784610] font-bold">RUSH YDS</span>
-                    <span className="font-sans text-xs sm:text-sm text-[#5c3509] font-bold">{seasonRush.toLocaleString()}</span>
-                  </div>
-                  <div className="p-1 bg-[#fff8eb] border border-[#e2ba7d] rounded-xs">
-                    <span className="block font-sans text-[10px] text-[#784610] font-bold">REC YDS</span>
-                    <span className="font-sans text-xs sm:text-sm text-[#5c3509] font-bold">{seasonRec.toLocaleString()}</span>
-                  </div>
-                  <div className="p-1 bg-[#fff8eb] border border-[#e2ba7d] rounded-xs">
-                    <span className="block font-sans text-[10px] text-[#784610] font-bold">TDS</span>
-                    <span className="font-sans text-xs sm:text-sm text-[#b45309] font-bold">{seasonTds}</span>
-                  </div>
-                </div>
-              </div>
-            )}
-          </>
+          </div>
         )}
 
         {/* Actions: Always visible at bottom without scrolling */}
